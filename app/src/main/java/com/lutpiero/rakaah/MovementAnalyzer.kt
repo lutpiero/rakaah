@@ -35,7 +35,12 @@ class MovementAnalyzer(
 
     @SuppressLint("UnsafeOptInUsageError")
     override fun analyze(imageProxy: ImageProxy) {
-        val mediaImage = imageProxy.image ?: run { imageProxy.close(); return }
+        val mediaImage = imageProxy.image
+        if (mediaImage == null) {
+            // No image data in this frame; close the proxy to unblock the pipeline.
+            imageProxy.close()
+            return
+        }
         val inputImage = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
 
         detector.process(inputImage)

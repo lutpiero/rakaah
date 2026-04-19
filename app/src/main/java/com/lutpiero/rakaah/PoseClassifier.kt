@@ -27,6 +27,24 @@ object PoseClassifier {
     /** Minimum in-frame confidence required for each landmark. */
     private const val MIN_CONFIDENCE = 0.5f
 
+    /**
+     * Nose must be within this fraction of trunk length above the hip to
+     * classify as prostration (Sujud). Higher values tolerate less precision.
+     */
+    private const val PROSTRATION_NOSE_THRESHOLD = 0.25f
+
+    /**
+     * Trunk length must be less than this fraction of visible body height
+     * to classify as bowing (Ruku). Smaller values require deeper bowing.
+     */
+    private const val BOWING_TRUNK_RATIO = 0.20f
+
+    /**
+     * Hip-to-knee distance must be less than this fraction of trunk length
+     * to classify as sitting (Jalsa). Smaller values require more leg bend.
+     */
+    private const val SITTING_LEG_THRESHOLD = 0.40f
+
     fun classify(pose: Pose): PhysicalPose {
         val nose = landmark(pose, PoseLandmark.NOSE) ?: return PhysicalPose.UNKNOWN
         val lShoulder = landmark(pose, PoseLandmark.LEFT_SHOULDER) ?: return PhysicalPose.UNKNOWN
@@ -48,13 +66,13 @@ object PoseClassifier {
 
         return when {
             // Sujud: nose has descended to near or below hip level (prostration)
-            noseY >= hipY - trunkLen * 0.25f -> PhysicalPose.PROSTRATING
+            noseY >= hipY - trunkLen * PROSTRATION_NOSE_THRESHOLD -> PhysicalPose.PROSTRATING
 
             // Ruku: trunk is compressed — shoulders are close to hip height
-            trunkLen < bodyHeight * 0.20f -> PhysicalPose.BOWING
+            trunkLen < bodyHeight * BOWING_TRUNK_RATIO -> PhysicalPose.BOWING
 
             // Jalsa: sitting — thigh is nearly vertical so kneeY ≈ hipY
-            abs(legLen) < trunkLen * 0.40f -> PhysicalPose.SITTING
+            abs(legLen) < trunkLen * SITTING_LEG_THRESHOLD -> PhysicalPose.SITTING
 
             // Default: upright standing
             else -> PhysicalPose.STANDING
