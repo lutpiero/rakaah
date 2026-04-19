@@ -9,4 +9,12 @@
     <string name="camera_starting">📷 Starting camera…</string>
     <string name="camera_permission_denied">⚠ Camera permission denied — use manual button</string>
     <string name="camera_error">⚠ Camera unavailable — use manual button</string>
+    <string name="pose_guide_no_person">Guide: Move into camera frame</string>
+    <string name="pose_guide_correct_format">Detected: %1$s ✓ (correct)</string>
+    <string name="pose_guide_wrong_format">Detected: %1$s (expected %2$s)</string>
+    <string name="pose_label_standing">Standing</string>
+    <string name="pose_label_bowing">Bowing</string>
+    <string name="pose_label_prostrating">Prostrating</string>
+    <string name="pose_label_sitting">Sitting</string>
+    <string name="pose_label_unknown">Unknown</string>
 </resources>

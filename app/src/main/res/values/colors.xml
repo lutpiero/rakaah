@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="pose_guide_unknown">#CFD8DC</color>
+    <color name="pose_guide_correct">#66BB6A</color>
+    <color name="pose_guide_wrong">#FFA726</color>
+</resources>

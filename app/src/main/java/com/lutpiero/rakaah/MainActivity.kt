@@ -13,6 +13,7 @@ import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
+import com.google.mediapipe.tasks.vision.poselandmarker.PoseLandmarker
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
@@ -21,6 +22,12 @@ class MainActivity : AppCompatActivity() {
     private val tracker = RakaahTracker()
     private var movementAnalyzer: MovementAnalyzer? = null
     private lateinit var cameraExecutor: ExecutorService
+    private lateinit var movementText: TextView
+    private lateinit var rakaahText: TextView
+    private lateinit var poseGuideText: TextView
+    private lateinit var cameraStatusText: TextView
+    private lateinit var overlayView: OverlayView
+    private var lastDetectedPose: PhysicalPose = PhysicalPose.UNKNOWN
 
     // Permission launcher
     private val cameraPermissionLauncher = registerForActivityResult(
@@ -35,8 +42,11 @@ class MainActivity : AppCompatActivity() {
 
         cameraExecutor = Executors.newSingleThreadExecutor()
 
-        val movementText = findViewById<TextView>(R.id.movementName)
-        val rakaahText = findViewById<TextView>(R.id.rakaahCount)
+        movementText = findViewById(R.id.movementName)
+        rakaahText = findViewById(R.id.rakaahCount)
+        poseGuideText = findViewById(R.id.poseGuide)
+        cameraStatusText = findViewById(R.id.cameraStatus)
+        overlayView = findViewById(R.id.poseOverlay)
         val nextButton = findViewById<Button>(R.id.nextMovementButton)
         val resetButton = findViewById<Button>(R.id.resetButton)
 
@@ -44,10 +54,12 @@ class MainActivity : AppCompatActivity() {
 
         nextButton.setOnClickListener {
             renderState(movementText, rakaahText, tracker.nextState())
+            renderPoseGuide(lastDetectedPose)
         }
 
         resetButton.setOnClickListener {
             renderState(movementText, rakaahText, tracker.reset())
+            renderPoseGuide(lastDetectedPose)
         }
 
         requestCameraIfNeeded()
@@ -72,9 +84,24 @@ class MainActivity : AppCompatActivity() {
                 )
             }
 
-            val analyzer = MovementAnalyzer { physicalPose ->
-                runOnUiThread { onCameraPoseDetected(physicalPose) }
-            }
+            val analyzer = MovementAnalyzer(
+                context = this,
+                onPoseChanged = { physicalPose ->
+                    runOnUiThread { onCameraPoseDetected(physicalPose) }
+                },
+                onFrameResult = { physicalPose, landmarks ->
+                    runOnUiThread {
+                        lastDetectedPose = physicalPose
+                        overlayView.updatePose(
+                            landmarks = landmarks,
+                            connections = PoseLandmarker.POSE_LANDMARKS,
+                            isMirrored = true
+                        )
+                        renderPoseGuide(physicalPose)
+                    }
+                }
+            )
+            renderPoseGuide(PhysicalPose.UNKNOWN)
             movementAnalyzer = analyzer
 
             val imageAnalysis = ImageAnalysis.Builder()
@@ -104,9 +131,8 @@ class MainActivity : AppCompatActivity() {
     private fun onCameraPoseDetected(physicalPose: PhysicalPose) {
         val expectedPhysical = movementToPhysicalPose(tracker.peekNextMovement())
         if (physicalPose == expectedPhysical) {
-            val movementText = findViewById<TextView>(R.id.movementName)
-            val rakaahText = findViewById<TextView>(R.id.rakaahCount)
             renderState(movementText, rakaahText, tracker.nextState())
+            renderPoseGuide(lastDetectedPose)
         }
     }
 
@@ -119,8 +145,47 @@ class MainActivity : AppCompatActivity() {
         rakaahText.text = getString(R.string.rakaah_count_format, state.rakaahCount)
     }
 
+    private fun renderPoseGuide(detectedPose: PhysicalPose) {
+        val expectedPhysical = movementToPhysicalPose(tracker.peekNextMovement())
+        when {
+            detectedPose == PhysicalPose.UNKNOWN -> {
+                poseGuideText.text = getString(R.string.pose_guide_no_person)
+                poseGuideText.setTextColor(
+                    ContextCompat.getColor(this, R.color.pose_guide_unknown)
+                )
+            }
+            detectedPose == expectedPhysical -> {
+                poseGuideText.text = getString(
+                    R.string.pose_guide_correct_format,
+                    poseLabel(detectedPose)
+                )
+                poseGuideText.setTextColor(
+                    ContextCompat.getColor(this, R.color.pose_guide_correct)
+                )
+            }
+            else -> {
+                poseGuideText.text = getString(
+                    R.string.pose_guide_wrong_format,
+                    poseLabel(detectedPose),
+                    poseLabel(expectedPhysical)
+                )
+                poseGuideText.setTextColor(
+                    ContextCompat.getColor(this, R.color.pose_guide_wrong)
+                )
+            }
+        }
+    }
+
+    private fun poseLabel(pose: PhysicalPose): String = when (pose) {
+        PhysicalPose.STANDING -> getString(R.string.pose_label_standing)
+        PhysicalPose.BOWING -> getString(R.string.pose_label_bowing)
+        PhysicalPose.PROSTRATING -> getString(R.string.pose_label_prostrating)
+        PhysicalPose.SITTING -> getString(R.string.pose_label_sitting)
+        PhysicalPose.UNKNOWN -> getString(R.string.pose_label_unknown)
+    }
+
     private fun showCameraStatus(stringRes: Int) {
-        findViewById<TextView>(R.id.cameraStatus).setText(stringRes)
+        cameraStatusText.setText(stringRes)
     }
 
     override fun onDestroy() {
