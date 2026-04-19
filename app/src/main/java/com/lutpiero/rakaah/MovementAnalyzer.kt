@@ -81,7 +81,7 @@ class MovementAnalyzer(
 
     private fun handlePoseResult(
         result: PoseLandmarkerResult,
-        _: com.google.mediapipe.framework.image.MPImage
+        @Suppress("UNUSED_PARAMETER") inputImage: com.google.mediapipe.framework.image.MPImage
     ) {
         inFlightFrames.remove(result.timestampMs())?.close()
 
