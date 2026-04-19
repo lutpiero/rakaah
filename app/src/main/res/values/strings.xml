@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Rakaah Counter</string>
+    <string name="current_movement">Current Movement</string>
+    <string name="next_movement">Next (Manual)</string>
+    <string name="reset">Reset</string>
+    <string name="rakaah_count_format">Rakaah: %1$d</string>
+    <string name="camera_active">📷 Camera active — auto-detecting pose</string>
+    <string name="camera_starting">📷 Starting camera…</string>
+    <string name="camera_permission_denied">⚠ Camera permission denied — use manual button</string>
+    <string name="camera_error">⚠ Camera unavailable — use manual button</string>
+</resources>
