@@ -3,6 +3,7 @@ package com.lutpiero.rakaah
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.util.Log
 import android.widget.Button
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
@@ -84,40 +85,56 @@ class MainActivity : AppCompatActivity() {
                 )
             }
 
-            val analyzer = MovementAnalyzer(
-                context = this,
-                onPoseChanged = { physicalPose ->
-                    runOnUiThread { onCameraPoseDetected(physicalPose) }
-                },
-                onFrameResult = { physicalPose, landmarks ->
-                    runOnUiThread {
-                        lastDetectedPose = physicalPose
-                        overlayView.updatePose(
-                            landmarks = landmarks,
-                            connections = PoseLandmarker.POSE_LANDMARKS,
-                            isMirrored = true
-                        )
-                        renderPoseGuide(physicalPose)
+            val analyzer = try {
+                MovementAnalyzer(
+                    context = this,
+                    onPoseChanged = { physicalPose ->
+                        runOnUiThread { onCameraPoseDetected(physicalPose) }
+                    },
+                    onFrameResult = { physicalPose, landmarks ->
+                        runOnUiThread {
+                            lastDetectedPose = physicalPose
+                            overlayView.updatePose(
+                                landmarks = landmarks,
+                                connections = PoseLandmarker.POSE_LANDMARKS,
+                                isMirrored = true
+                            )
+                            renderPoseGuide(physicalPose)
+                        }
                     }
-                }
-            )
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to create movement analyzer", e)
+                showCameraStatus(R.string.camera_error)
+                null
+            }
             renderPoseGuide(PhysicalPose.UNKNOWN)
             movementAnalyzer = analyzer
 
-            val imageAnalysis = ImageAnalysis.Builder()
-                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                .build()
-                .also { it.setAnalyzer(cameraExecutor, analyzer) }
+            val imageAnalysis = analyzer?.let {
+                ImageAnalysis.Builder()
+                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                    .build()
+                    .also { analysis -> analysis.setAnalyzer(cameraExecutor, it) }
+            }
 
             try {
                 cameraProvider.unbindAll()
-                cameraProvider.bindToLifecycle(
-                    this,
-                    CameraSelector.DEFAULT_FRONT_CAMERA,
-                    preview,
-                    imageAnalysis
-                )
-                showCameraStatus(R.string.camera_active)
+                if (imageAnalysis != null) {
+                    cameraProvider.bindToLifecycle(
+                        this,
+                        CameraSelector.DEFAULT_FRONT_CAMERA,
+                        preview,
+                        imageAnalysis
+                    )
+                    showCameraStatus(R.string.camera_active)
+                } else {
+                    cameraProvider.bindToLifecycle(
+                        this,
+                        CameraSelector.DEFAULT_FRONT_CAMERA,
+                        preview
+                    )
+                }
             } catch (e: Exception) {
                 showCameraStatus(R.string.camera_error)
             }
@@ -192,5 +209,9 @@ class MainActivity : AppCompatActivity() {
         super.onDestroy()
         movementAnalyzer?.close()
         cameraExecutor.shutdown()
+    }
+
+    companion object {
+        private const val TAG = "MainActivity"
     }
 }
