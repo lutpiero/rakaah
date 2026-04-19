@@ -1,17 +1,22 @@
 package com.lutpiero.rakaah
 
 import android.annotation.SuppressLint
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.content.Context
+import android.graphics.ImageFormat
+import android.graphics.Rect
+import android.graphics.YuvImage
 import android.util.Log
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
-import androidx.camera.core.toBitmap
 import com.google.mediapipe.framework.image.BitmapImageBuilder
 import com.google.mediapipe.tasks.components.containers.NormalizedLandmark
 import com.google.mediapipe.tasks.core.BaseOptions
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.poselandmarker.PoseLandmarker
 import com.google.mediapipe.tasks.vision.poselandmarker.PoseLandmarkerResult
+import java.io.ByteArrayOutputStream
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 
@@ -65,7 +70,10 @@ class MovementAnalyzer(
         }
 
         try {
-            val bitmap = imageProxy.toBitmap()
+            val bitmap = imageProxyToBitmap(imageProxy) ?: run {
+                Log.e(TAG, "Failed to convert frame to bitmap")
+                return
+            }
             val mpImage = BitmapImageBuilder(bitmap).build()
             val timestampMs = imageProxy.imageInfo.timestamp / 1_000_000L
             detector.detectAsync(mpImage, timestampMs)
@@ -74,6 +82,28 @@ class MovementAnalyzer(
         } finally {
             imageProxy.close()
         }
+    }
+
+    private fun imageProxyToBitmap(imageProxy: ImageProxy): Bitmap? {
+        if (imageProxy.format != ImageFormat.YUV_420_888 || imageProxy.planes.size < 3) {
+            return null
+        }
+
+        val yBuffer = imageProxy.planes[0].buffer
+        val uBuffer = imageProxy.planes[1].buffer
+        val vBuffer = imageProxy.planes[2].buffer
+        val ySize = yBuffer.remaining()
+        val uSize = uBuffer.remaining()
+        val vSize = vBuffer.remaining()
+        val nv21 = ByteArray(ySize + uSize + vSize)
+        yBuffer.get(nv21, 0, ySize)
+        vBuffer.get(nv21, ySize, vSize)
+        uBuffer.get(nv21, ySize + vSize, uSize)
+        val yuvImage = YuvImage(nv21, ImageFormat.NV21, imageProxy.width, imageProxy.height, null)
+        val out = ByteArrayOutputStream()
+        yuvImage.compressToJpeg(Rect(0, 0, imageProxy.width, imageProxy.height), 100, out)
+        val bytes = out.toByteArray()
+        return BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
     }
 
     private fun handlePoseResult(
