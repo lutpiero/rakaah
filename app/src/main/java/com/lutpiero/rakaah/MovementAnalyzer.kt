@@ -5,14 +5,13 @@ import android.content.Context
 import android.util.Log
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
-import com.google.mediapipe.framework.image.MediaImageBuilder
+import androidx.camera.core.toBitmap
+import com.google.mediapipe.framework.image.BitmapImageBuilder
 import com.google.mediapipe.tasks.components.containers.NormalizedLandmark
 import com.google.mediapipe.tasks.core.BaseOptions
-import com.google.mediapipe.tasks.vision.core.ImageProcessingOptions
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.poselandmarker.PoseLandmarker
 import com.google.mediapipe.tasks.vision.poselandmarker.PoseLandmarkerResult
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 
@@ -31,26 +30,27 @@ class MovementAnalyzer(
     private val onFrameResult: (PhysicalPose, List<NormalizedLandmark>) -> Unit
 ) : ImageAnalysis.Analyzer {
 
-    private val inFlightFrames = ConcurrentHashMap<Long, ImageProxy>()
-
-    private val detector = PoseLandmarker.createFromOptions(
-        context,
-        PoseLandmarker.PoseLandmarkerOptions.builder()
-            .setBaseOptions(
-                BaseOptions.builder()
-                    .setModelAssetPath(MODEL_ASSET_NAME)
-                    .build()
-            )
-            .setRunningMode(RunningMode.LIVE_STREAM)
-            .setResultListener(::handlePoseResult)
-            .setErrorListener { error ->
-                Log.e(TAG, "PoseLandmarker error", error)
-                inFlightFrames.values.forEach { it.close() }
-                inFlightFrames.clear()
-                onFrameResult(PhysicalPose.UNKNOWN, emptyList())
-            }
-            .build()
-    )
+    private val detector: PoseLandmarker? = try {
+        PoseLandmarker.createFromOptions(
+            context,
+            PoseLandmarker.PoseLandmarkerOptions.builder()
+                .setBaseOptions(
+                    BaseOptions.builder()
+                        .setModelAssetPath(MODEL_ASSET_NAME)
+                        .build()
+                )
+                .setRunningMode(RunningMode.LIVE_STREAM)
+                .setResultListener(::handlePoseResult)
+                .setErrorListener { error ->
+                    Log.e(TAG, "PoseLandmarker error", error)
+                    onFrameResult(PhysicalPose.UNKNOWN, emptyList())
+                }
+                .build()
+        )
+    } catch (e: Exception) {
+        Log.e(TAG, "Failed to initialize PoseLandmarker", e)
+        null
+    }
 
     private val candidatePose = AtomicReference(PhysicalPose.UNKNOWN)
     private val candidateSince = AtomicLong(0L)
@@ -58,24 +58,21 @@ class MovementAnalyzer(
 
     @SuppressLint("UnsafeOptInUsageError")
     override fun analyze(imageProxy: ImageProxy) {
-        val mediaImage = imageProxy.image
-        if (mediaImage == null) {
-            // No image data in this frame; close the proxy to unblock the pipeline.
+        val detector = detector
+        if (detector == null) {
             imageProxy.close()
             return
         }
 
-        val mpImage = MediaImageBuilder(mediaImage).build()
-        val imageProcessingOptions = ImageProcessingOptions.builder()
-            .setRotationDegrees(imageProxy.imageInfo.rotationDegrees)
-            .build()
-        val timestampMs = imageProxy.imageInfo.timestamp / 1_000_000L
-        inFlightFrames[timestampMs] = imageProxy
         try {
-            detector.detectAsync(mpImage, imageProcessingOptions, timestampMs)
-        } catch (e: RuntimeException) {
-            inFlightFrames.remove(timestampMs)?.close()
-            throw e
+            val bitmap = imageProxy.toBitmap()
+            val mpImage = BitmapImageBuilder(bitmap).build()
+            val timestampMs = imageProxy.imageInfo.timestamp / 1_000_000L
+            detector.detectAsync(mpImage, timestampMs)
+        } catch (e: Exception) {
+            Log.e(TAG, "Frame analysis failed", e)
+        } finally {
+            imageProxy.close()
         }
     }
 
@@ -83,8 +80,6 @@ class MovementAnalyzer(
         result: PoseLandmarkerResult,
         @Suppress("UNUSED_PARAMETER") inputImage: com.google.mediapipe.framework.image.MPImage
     ) {
-        inFlightFrames.remove(result.timestampMs())?.close()
-
         val normalizedPoseLandmarks = result.landmarks().firstOrNull().orEmpty()
         val worldPoseLandmarks = result.worldLandmarks().firstOrNull().orEmpty()
         val detected = PoseClassifier.classify(worldPoseLandmarks, normalizedPoseLandmarks)
@@ -113,9 +108,7 @@ class MovementAnalyzer(
     }
 
     fun close() {
-        inFlightFrames.values.forEach { it.close() }
-        inFlightFrames.clear()
-        detector.close()
+        detector?.close()
     }
 
     companion object {
