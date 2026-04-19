@@ -24,6 +24,12 @@ class RakaahTracker {
         rakaahCount = rakaahCount
     )
 
+    /** Returns the movement name that would result from calling [nextState]. */
+    fun peekNextMovementName(): String {
+        val nextIndex = (movementIndex + 1) % movementCycle.size
+        return movementCycle[nextIndex]
+    }
+
     fun nextState(): PrayerState {
         movementIndex = (movementIndex + 1) % movementCycle.size
         if (movementIndex == 0) {
