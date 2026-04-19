@@ -1,9 +1,9 @@
 package com.lutpiero.rakaah
 
-import com.google.mlkit.vision.pose.Pose
-import com.google.mlkit.vision.pose.PoseLandmark
-import kotlin.math.abs
-import kotlin.math.max
+import com.google.mediapipe.tasks.components.containers.Landmark
+import com.google.mediapipe.tasks.components.containers.NormalizedLandmark
+import kotlin.math.acos
+import kotlin.math.sqrt
 
 /**
  * Maps a prayer movement name to a physical pose category detectable from the camera.
@@ -17,73 +17,95 @@ enum class PhysicalPose {
 }
 
 /**
- * Classifies an ML Kit [Pose] into one of the [PhysicalPose] categories
- * using landmark geometry.
- *
- * Coordinate system: image coordinates where y increases downward.
+ * Classifies a MediaPipe pose into one of the [PhysicalPose] categories
+ * using 3D joint angles from world landmarks.
  */
 object PoseClassifier {
 
-    /** Minimum in-frame confidence required for each landmark. */
-    private const val MIN_CONFIDENCE = 0.5f
+    private const val MIN_PRESENCE = 0.4f
+    private const val STANDING_MIN_ANGLE = 145f
+    private const val SITTING_MAX_ANGLE = 130f
+    private const val BOWING_TRUNK_MIN = 45f
+    private const val PROSTRATING_TRUNK_MIN = 65f
 
-    /**
-     * Nose must be within this fraction of trunk length above the hip to
-     * classify as prostration (Sujud). Higher values tolerate less precision.
-     */
-    private const val PROSTRATION_NOSE_THRESHOLD = 0.25f
+    fun classify(
+        worldLandmarks: List<Landmark>,
+        normalizedLandmarks: List<NormalizedLandmark>
+    ): PhysicalPose {
+        if (worldLandmarks.size < REQUIRED_LANDMARK_COUNT || normalizedLandmarks.size < REQUIRED_LANDMARK_COUNT) {
+            return PhysicalPose.UNKNOWN
+        }
 
-    /**
-     * Trunk length must be less than this fraction of visible body height
-     * to classify as bowing (Ruku). Smaller values require deeper bowing.
-     */
-    private const val BOWING_TRUNK_RATIO = 0.20f
+        val required = listOf(11, 12, 23, 24, 25, 26, 27, 28)
+        if (required.any { !isPresent(normalizedLandmarks[it]) }) return PhysicalPose.UNKNOWN
 
-    /**
-     * Hip-to-knee distance must be less than this fraction of trunk length
-     * to classify as sitting (Jalsa). Smaller values require more leg bend.
-     */
-    private const val SITTING_LEG_THRESHOLD = 0.40f
+        val shoulderMid = midpoint(worldLandmarks[11], worldLandmarks[12])
+        val hipMid = midpoint(worldLandmarks[23], worldLandmarks[24])
+        val vertical = Vec3(0f, 1f, 0f)
+        val trunkInclination = angleBetween(hipMid - shoulderMid, vertical)
 
-    fun classify(pose: Pose): PhysicalPose {
-        val nose = landmark(pose, PoseLandmark.NOSE) ?: return PhysicalPose.UNKNOWN
-        val lShoulder = landmark(pose, PoseLandmark.LEFT_SHOULDER) ?: return PhysicalPose.UNKNOWN
-        val rShoulder = landmark(pose, PoseLandmark.RIGHT_SHOULDER) ?: return PhysicalPose.UNKNOWN
-        val lHip = landmark(pose, PoseLandmark.LEFT_HIP) ?: return PhysicalPose.UNKNOWN
-        val rHip = landmark(pose, PoseLandmark.RIGHT_HIP) ?: return PhysicalPose.UNKNOWN
-        val lKnee = landmark(pose, PoseLandmark.LEFT_KNEE) ?: return PhysicalPose.UNKNOWN
-        val rKnee = landmark(pose, PoseLandmark.RIGHT_KNEE) ?: return PhysicalPose.UNKNOWN
+        val hipAngle = average(
+            jointAngle(worldLandmarks[11], worldLandmarks[23], worldLandmarks[25]),
+            jointAngle(worldLandmarks[12], worldLandmarks[24], worldLandmarks[26])
+        )
 
-        val shoulderY = (lShoulder.position.y + rShoulder.position.y) / 2f
-        val hipY = (lHip.position.y + rHip.position.y) / 2f
-        val kneeY = (lKnee.position.y + rKnee.position.y) / 2f
-        val noseY = nose.position.y
-
-        // Distances (positive = downward in image)
-        val trunkLen = hipY - shoulderY          // large when standing upright
-        val legLen = kneeY - hipY                 // distance from hip to knee
-        val bodyHeight = max(kneeY - noseY, 1f)  // overall visible body height
+        val kneeAngle = average(
+            jointAngle(worldLandmarks[23], worldLandmarks[25], worldLandmarks[27]),
+            jointAngle(worldLandmarks[24], worldLandmarks[26], worldLandmarks[28])
+        )
 
         return when {
-            // Sujud: nose has descended to near or below hip level (prostration)
-            noseY >= hipY - trunkLen * PROSTRATION_NOSE_THRESHOLD -> PhysicalPose.PROSTRATING
+            trunkInclination >= PROSTRATING_TRUNK_MIN && kneeAngle < STANDING_MIN_ANGLE ->
+                PhysicalPose.PROSTRATING
 
-            // Ruku: trunk is compressed — shoulders are close to hip height
-            trunkLen < bodyHeight * BOWING_TRUNK_RATIO -> PhysicalPose.BOWING
+            trunkInclination >= BOWING_TRUNK_MIN && kneeAngle >= STANDING_MIN_ANGLE ->
+                PhysicalPose.BOWING
 
-            // Jalsa: sitting — thigh is nearly vertical so kneeY ≈ hipY
-            abs(legLen) < trunkLen * SITTING_LEG_THRESHOLD -> PhysicalPose.SITTING
+            trunkInclination < BOWING_TRUNK_MIN &&
+                hipAngle < SITTING_MAX_ANGLE &&
+                kneeAngle < SITTING_MAX_ANGLE ->
+                PhysicalPose.SITTING
 
-            // Default: upright standing
-            else -> PhysicalPose.STANDING
+            hipAngle >= STANDING_MIN_ANGLE && kneeAngle >= STANDING_MIN_ANGLE ->
+                PhysicalPose.STANDING
+
+            else -> PhysicalPose.UNKNOWN
         }
     }
 
-    /** Returns the [PoseLandmark] only if it meets the minimum confidence threshold. */
-    private fun landmark(pose: Pose, type: Int): PoseLandmark? {
-        val lm = pose.getPoseLandmark(type) ?: return null
-        return if (lm.inFrameLikelihood >= MIN_CONFIDENCE) lm else null
+    private fun isPresent(landmark: NormalizedLandmark): Boolean {
+        return landmark.presence().orElse(1f) >= MIN_PRESENCE
     }
+
+    private fun midpoint(a: Landmark, b: Landmark): Vec3 = Vec3(
+        x = (a.x() + b.x()) / 2f,
+        y = (a.y() + b.y()) / 2f,
+        z = (a.z() + b.z()) / 2f
+    )
+
+    private fun jointAngle(a: Landmark, b: Landmark, c: Landmark): Float {
+        return angleBetween(
+            Vec3(a.x() - b.x(), a.y() - b.y(), a.z() - b.z()),
+            Vec3(c.x() - b.x(), c.y() - b.y(), c.z() - b.z())
+        )
+    }
+
+    private fun angleBetween(a: Vec3, b: Vec3): Float {
+        val denom = a.magnitude() * b.magnitude()
+        if (denom == 0f) return 0f
+        val cosine = (a.dot(b) / denom).coerceIn(-1f, 1f)
+        return Math.toDegrees(acos(cosine).toDouble()).toFloat()
+    }
+
+    private fun average(a: Float, b: Float): Float = (a + b) / 2f
+
+    private data class Vec3(val x: Float, val y: Float, val z: Float) {
+        fun dot(other: Vec3): Float = x * other.x + y * other.y + z * other.z
+        fun magnitude(): Float = sqrt(x * x + y * y + z * z)
+        operator fun minus(other: Vec3): Vec3 = Vec3(x - other.x, y - other.y, z - other.z)
+    }
+
+    private const val REQUIRED_LANDMARK_COUNT = 29
 }
 
 /** Maps a [Movement] to a physical camera-detectable pose. */
