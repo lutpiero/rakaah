@@ -44,9 +44,9 @@ dependencies {
     implementation("androidx.activity:activity-ktx:1.9.3")
 
     // CameraX
-    implementation("androidx.camera:camera-camera2:1.3.4")
-    implementation("androidx.camera:camera-lifecycle:1.3.4")
-    implementation("androidx.camera:camera-view:1.3.4")
+    implementation("androidx.camera:camera-camera2:1.4.1")
+    implementation("androidx.camera:camera-lifecycle:1.4.1")
+    implementation("androidx.camera:camera-view:1.4.1")
 
     // MediaPipe Pose Landmarker
     implementation("com.google.mediapipe:tasks-vision:0.10.14")
