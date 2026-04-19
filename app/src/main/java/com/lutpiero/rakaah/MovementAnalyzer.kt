@@ -85,6 +85,10 @@ class MovementAnalyzer(
     }
 
     private fun imageProxyToBitmap(imageProxy: ImageProxy): Bitmap? {
+        if (imageProxy.format != ImageFormat.YUV_420_888 || imageProxy.planes.size < 3) {
+            return null
+        }
+
         val yBuffer = imageProxy.planes[0].buffer
         val uBuffer = imageProxy.planes[1].buffer
         val vBuffer = imageProxy.planes[2].buffer
