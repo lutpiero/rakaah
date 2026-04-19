@@ -47,7 +47,7 @@ class OverlayView @JvmOverloads constructor(
         super.onDraw(canvas)
         if (landmarks.isEmpty()) return
 
-        val radius = min(width, height) * 0.008f
+        val radius = min(width, height) * POINT_RADIUS_RATIO
 
         connections.forEach { connection ->
             val start = landmarks.getOrNull(connection.start()) ?: return@forEach
@@ -77,4 +77,8 @@ class OverlayView @JvmOverloads constructor(
     }
 
     private fun mapY(normalizedY: Float): Float = normalizedY * height
+
+    companion object {
+        private const val POINT_RADIUS_RATIO = 0.008f
+    }
 }

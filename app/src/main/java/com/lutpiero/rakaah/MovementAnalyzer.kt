@@ -2,6 +2,7 @@ package com.lutpiero.rakaah
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.util.Log
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import com.google.mediapipe.framework.image.MediaImageBuilder
@@ -11,6 +12,7 @@ import com.google.mediapipe.tasks.vision.core.ImageProcessingOptions
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.poselandmarker.PoseLandmarker
 import com.google.mediapipe.tasks.vision.poselandmarker.PoseLandmarkerResult
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 
@@ -29,6 +31,8 @@ class MovementAnalyzer(
     private val onFrameResult: (PhysicalPose, List<NormalizedLandmark>) -> Unit
 ) : ImageAnalysis.Analyzer {
 
+    private val inFlightFrames = ConcurrentHashMap<Long, ImageProxy>()
+
     private val detector = PoseLandmarker.createFromOptions(
         context,
         PoseLandmarker.PoseLandmarkerOptions.builder()
@@ -39,7 +43,10 @@ class MovementAnalyzer(
             )
             .setRunningMode(RunningMode.LIVE_STREAM)
             .setResultListener(::handlePoseResult)
-            .setErrorListener {
+            .setErrorListener { error ->
+                Log.e(TAG, "PoseLandmarker error", error)
+                inFlightFrames.values.forEach { it.close() }
+                inFlightFrames.clear()
                 onFrameResult(PhysicalPose.UNKNOWN, emptyList())
             }
             .build()
@@ -63,18 +70,25 @@ class MovementAnalyzer(
             .setRotationDegrees(imageProxy.imageInfo.rotationDegrees)
             .build()
         val timestampMs = imageProxy.imageInfo.timestamp / 1_000_000L
-        detector.detectAsync(mpImage, imageProcessingOptions, timestampMs)
-        imageProxy.close()
+        inFlightFrames[timestampMs] = imageProxy
+        try {
+            detector.detectAsync(mpImage, imageProcessingOptions, timestampMs)
+        } catch (e: RuntimeException) {
+            inFlightFrames.remove(timestampMs)?.close()
+            throw e
+        }
     }
 
     private fun handlePoseResult(
         result: PoseLandmarkerResult,
         _: com.google.mediapipe.framework.image.MPImage
     ) {
-        val normalizedLandmarks = result.landmarks().firstOrNull().orEmpty()
-        val worldLandmarks = result.worldLandmarks().firstOrNull().orEmpty()
-        val detected = PoseClassifier.classify(worldLandmarks, normalizedLandmarks)
-        onFrameResult(detected, normalizedLandmarks)
+        inFlightFrames.remove(result.timestampMs())?.close()
+
+        val normalizedPoseLandmarks = result.landmarks().firstOrNull().orEmpty()
+        val worldPoseLandmarks = result.worldLandmarks().firstOrNull().orEmpty()
+        val detected = PoseClassifier.classify(worldPoseLandmarks, normalizedPoseLandmarks)
+        onFrameResult(detected, normalizedPoseLandmarks)
 
         val now = System.currentTimeMillis()
         val prev = candidatePose.get()
@@ -99,12 +113,16 @@ class MovementAnalyzer(
     }
 
     fun close() {
+        inFlightFrames.values.forEach { it.close() }
+        inFlightFrames.clear()
         detector.close()
     }
 
     companion object {
         /** Minimum time (ms) a pose must be held before it is considered stable. */
         private const val HOLD_DURATION_MS = 600L
+        /** MediaPipe pose model file in app/src/main/assets/. */
         private const val MODEL_ASSET_NAME = "pose_landmarker_lite.task"
+        private const val TAG = "MovementAnalyzer"
     }
 }

@@ -2,7 +2,9 @@ package com.lutpiero.rakaah
 
 import com.google.mediapipe.tasks.components.containers.Landmark
 import com.google.mediapipe.tasks.components.containers.NormalizedLandmark
+import kotlin.math.PI
 import kotlin.math.acos
+import kotlin.math.min
 import kotlin.math.sqrt
 
 /**
@@ -27,6 +29,16 @@ object PoseClassifier {
     private const val SITTING_MAX_ANGLE = 130f
     private const val BOWING_TRUNK_MIN = 45f
     private const val PROSTRATING_TRUNK_MIN = 65f
+    // Highest index used by this classifier is RIGHT_ANKLE (28), so 29 landmarks are required.
+    private const val REQUIRED_LANDMARK_COUNT = 29
+    private const val LEFT_SHOULDER = 11
+    private const val RIGHT_SHOULDER = 12
+    private const val LEFT_HIP = 23
+    private const val RIGHT_HIP = 24
+    private const val LEFT_KNEE = 25
+    private const val RIGHT_KNEE = 26
+    private const val LEFT_ANKLE = 27
+    private const val RIGHT_ANKLE = 28
 
     fun classify(
         worldLandmarks: List<Landmark>,
@@ -36,22 +48,26 @@ object PoseClassifier {
             return PhysicalPose.UNKNOWN
         }
 
-        val required = listOf(11, 12, 23, 24, 25, 26, 27, 28)
+        val required = listOf(
+            LEFT_SHOULDER, RIGHT_SHOULDER, LEFT_HIP, RIGHT_HIP,
+            LEFT_KNEE, RIGHT_KNEE, LEFT_ANKLE, RIGHT_ANKLE
+        )
         if (required.any { !isPresent(normalizedLandmarks[it]) }) return PhysicalPose.UNKNOWN
 
-        val shoulderMid = midpoint(worldLandmarks[11], worldLandmarks[12])
-        val hipMid = midpoint(worldLandmarks[23], worldLandmarks[24])
-        val vertical = Vec3(0f, 1f, 0f)
-        val trunkInclination = angleBetween(hipMid - shoulderMid, vertical)
+        val shoulderMid = midpoint(worldLandmarks[LEFT_SHOULDER], worldLandmarks[RIGHT_SHOULDER])
+        val hipMid = midpoint(worldLandmarks[LEFT_HIP], worldLandmarks[RIGHT_HIP])
+        val verticalAxis = Vec3(0f, 1f, 0f)
+        val rawTrunkAngle = angleBetween(hipMid - shoulderMid, verticalAxis)
+        val trunkInclination = min(rawTrunkAngle, 180f - rawTrunkAngle)
 
         val hipAngle = average(
-            jointAngle(worldLandmarks[11], worldLandmarks[23], worldLandmarks[25]),
-            jointAngle(worldLandmarks[12], worldLandmarks[24], worldLandmarks[26])
+            jointAngle(worldLandmarks[LEFT_SHOULDER], worldLandmarks[LEFT_HIP], worldLandmarks[LEFT_KNEE]),
+            jointAngle(worldLandmarks[RIGHT_SHOULDER], worldLandmarks[RIGHT_HIP], worldLandmarks[RIGHT_KNEE])
         )
 
         val kneeAngle = average(
-            jointAngle(worldLandmarks[23], worldLandmarks[25], worldLandmarks[27]),
-            jointAngle(worldLandmarks[24], worldLandmarks[26], worldLandmarks[28])
+            jointAngle(worldLandmarks[LEFT_HIP], worldLandmarks[LEFT_KNEE], worldLandmarks[LEFT_ANKLE]),
+            jointAngle(worldLandmarks[RIGHT_HIP], worldLandmarks[RIGHT_KNEE], worldLandmarks[RIGHT_ANKLE])
         )
 
         return when {
@@ -84,17 +100,16 @@ object PoseClassifier {
     )
 
     private fun jointAngle(a: Landmark, b: Landmark, c: Landmark): Float {
-        return angleBetween(
-            Vec3(a.x() - b.x(), a.y() - b.y(), a.z() - b.z()),
-            Vec3(c.x() - b.x(), c.y() - b.y(), c.z() - b.z())
-        )
+        val ba = Vec3(a.x() - b.x(), a.y() - b.y(), a.z() - b.z())
+        val bc = Vec3(c.x() - b.x(), c.y() - b.y(), c.z() - b.z())
+        return angleBetween(ba, bc)
     }
 
     private fun angleBetween(a: Vec3, b: Vec3): Float {
         val denom = a.magnitude() * b.magnitude()
         if (denom == 0f) return 0f
         val cosine = (a.dot(b) / denom).coerceIn(-1f, 1f)
-        return Math.toDegrees(acos(cosine).toDouble()).toFloat()
+        return acos(cosine) * (180f / PI.toFloat())
     }
 
     private fun average(a: Float, b: Float): Float = (a + b) / 2f
@@ -105,7 +120,6 @@ object PoseClassifier {
         operator fun minus(other: Vec3): Vec3 = Vec3(x - other.x, y - other.y, z - other.z)
     }
 
-    private const val REQUIRED_LANDMARK_COUNT = 29
 }
 
 /** Maps a [Movement] to a physical camera-detectable pose. */

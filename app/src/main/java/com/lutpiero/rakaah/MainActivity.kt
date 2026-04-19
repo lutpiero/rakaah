@@ -1,7 +1,6 @@
 package com.lutpiero.rakaah
 
 import android.Manifest
-import android.graphics.Color
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.widget.Button
@@ -151,14 +150,18 @@ class MainActivity : AppCompatActivity() {
         when {
             detectedPose == PhysicalPose.UNKNOWN -> {
                 poseGuideText.text = getString(R.string.pose_guide_no_person)
-                poseGuideText.setTextColor(Color.parseColor("#CFD8DC"))
+                poseGuideText.setTextColor(
+                    ContextCompat.getColor(this, R.color.pose_guide_unknown)
+                )
             }
             detectedPose == expectedPhysical -> {
                 poseGuideText.text = getString(
                     R.string.pose_guide_correct_format,
                     poseLabel(detectedPose)
                 )
-                poseGuideText.setTextColor(Color.parseColor("#66BB6A"))
+                poseGuideText.setTextColor(
+                    ContextCompat.getColor(this, R.color.pose_guide_correct)
+                )
             }
             else -> {
                 poseGuideText.text = getString(
@@ -166,7 +169,9 @@ class MainActivity : AppCompatActivity() {
                     poseLabel(detectedPose),
                     poseLabel(expectedPhysical)
                 )
-                poseGuideText.setTextColor(Color.parseColor("#FFA726"))
+                poseGuideText.setTextColor(
+                    ContextCompat.getColor(this, R.color.pose_guide_wrong)
+                )
             }
         }
     }
