@@ -68,11 +68,10 @@ object PoseClassifier {
     }
 }
 
-/** Maps a movement name from [RakaahTracker] to a physical camera-detectable pose. */
-fun movementToPhysicalPose(movementName: String): PhysicalPose = when (movementName) {
-    "Qiyam", "I'tidal" -> PhysicalPose.STANDING
-    "Ruku" -> PhysicalPose.BOWING
-    "Sujud" -> PhysicalPose.PROSTRATING
-    "Jalsa" -> PhysicalPose.SITTING
-    else -> PhysicalPose.UNKNOWN
+/** Maps a [Movement] to a physical camera-detectable pose. */
+fun movementToPhysicalPose(movement: Movement): PhysicalPose = when (movement) {
+    Movement.QIYAM, Movement.ITIDAL -> PhysicalPose.STANDING
+    Movement.RUKU                   -> PhysicalPose.BOWING
+    Movement.SUJUD                  -> PhysicalPose.PROSTRATING
+    Movement.JALSA                  -> PhysicalPose.SITTING
 }

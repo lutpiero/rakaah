@@ -1,31 +1,33 @@
 package com.lutpiero.rakaah
 
 data class PrayerState(
-    val movementName: String,
+    val movement: Movement,
     val rakaahCount: Int
-)
+) {
+    val movementName: String get() = movement.displayName
+}
 
 class RakaahTracker {
     private val movementCycle = listOf(
-        "Qiyam",
-        "Ruku",
-        "I'tidal",
-        "Sujud",
-        "Jalsa",
-        "Sujud",
-        "Qiyam"
+        Movement.QIYAM,
+        Movement.RUKU,
+        Movement.ITIDAL,
+        Movement.SUJUD,
+        Movement.JALSA,
+        Movement.SUJUD,
+        Movement.QIYAM
     )
 
     private var movementIndex = 0
     private var rakaahCount = 1
 
     fun currentState(): PrayerState = PrayerState(
-        movementName = movementCycle[movementIndex],
+        movement = movementCycle[movementIndex],
         rakaahCount = rakaahCount
     )
 
-    /** Returns the movement name that would result from calling [nextState]. */
-    fun peekNextMovementName(): String {
+    /** Returns the [Movement] that would result from calling [nextState], without advancing. */
+    fun peekNextMovement(): Movement {
         val nextIndex = (movementIndex + 1) % movementCycle.size
         return movementCycle[nextIndex]
     }

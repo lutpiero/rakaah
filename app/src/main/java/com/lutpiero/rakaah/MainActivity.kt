@@ -102,7 +102,7 @@ class MainActivity : AppCompatActivity() {
      * Advances the tracker only when the detected pose matches the expected next movement.
      */
     private fun onCameraPoseDetected(physicalPose: PhysicalPose) {
-        val expectedPhysical = movementToPhysicalPose(tracker.peekNextMovementName())
+        val expectedPhysical = movementToPhysicalPose(tracker.peekNextMovement())
         if (physicalPose == expectedPhysical) {
             val movementText = findViewById<TextView>(R.id.movementName)
             val rakaahText = findViewById<TextView>(R.id.rakaahCount)

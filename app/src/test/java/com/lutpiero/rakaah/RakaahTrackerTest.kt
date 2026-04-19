@@ -9,7 +9,7 @@ class RakaahTrackerTest {
     fun `starts from first movement and rakaah one`() {
         val tracker = RakaahTracker()
 
-        assertEquals("Qiyam", tracker.currentState().movementName)
+        assertEquals(Movement.QIYAM, tracker.currentState().movement)
         assertEquals(1, tracker.currentState().rakaahCount)
     }
 
@@ -21,7 +21,7 @@ class RakaahTrackerTest {
             tracker.nextState()
         }
 
-        assertEquals("Qiyam", tracker.currentState().movementName)
+        assertEquals(Movement.QIYAM, tracker.currentState().movement)
         assertEquals(2, tracker.currentState().rakaahCount)
     }
 
@@ -32,57 +32,66 @@ class RakaahTrackerTest {
 
         val resetState = tracker.reset()
 
-        assertEquals("Qiyam", resetState.movementName)
+        assertEquals(Movement.QIYAM, resetState.movement)
         assertEquals(1, resetState.rakaahCount)
     }
 
     @Test
-    fun `peekNextMovementName returns next without advancing state`() {
+    fun `peekNextMovement returns next without advancing state`() {
         val tracker = RakaahTracker()
 
-        val next = tracker.peekNextMovementName()
+        val next = tracker.peekNextMovement()
 
-        assertEquals("Ruku", next)
-        assertEquals("Qiyam", tracker.currentState().movementName)
+        assertEquals(Movement.RUKU, next)
+        assertEquals(Movement.QIYAM, tracker.currentState().movement)
     }
 
     @Test
     fun `full movement cycle peek matches nextState sequence`() {
         val tracker = RakaahTracker()
-        // After each peek we advance; the 7th peek (index=6) still returns "Qiyam" (wraps to 0)
-        val expectedPeeks = listOf("Ruku", "I'tidal", "Sujud", "Jalsa", "Sujud", "Qiyam", "Qiyam")
+        // After each peek we advance; at index=6 peek wraps back to index=0 (QIYAM)
+        val expectedPeeks = listOf(
+            Movement.RUKU, Movement.ITIDAL, Movement.SUJUD,
+            Movement.JALSA, Movement.SUJUD, Movement.QIYAM, Movement.QIYAM
+        )
 
         expectedPeeks.forEach { expected ->
-            assertEquals(expected, tracker.peekNextMovementName())
+            assertEquals(expected, tracker.peekNextMovement())
             tracker.nextState()
         }
+    }
+
+    @Test
+    fun `movementName on PrayerState returns enum display name`() {
+        val state = PrayerState(Movement.ITIDAL, 1)
+        assertEquals("I'tidal", state.movementName)
     }
 }
 
 class MovementToPhysicalPoseTest {
 
     @Test
-    fun `Qiyam maps to STANDING`() {
-        assertEquals(PhysicalPose.STANDING, movementToPhysicalPose("Qiyam"))
+    fun `QIYAM maps to STANDING`() {
+        assertEquals(PhysicalPose.STANDING, movementToPhysicalPose(Movement.QIYAM))
     }
 
     @Test
-    fun `Itidal maps to STANDING`() {
-        assertEquals(PhysicalPose.STANDING, movementToPhysicalPose("I'tidal"))
+    fun `ITIDAL maps to STANDING`() {
+        assertEquals(PhysicalPose.STANDING, movementToPhysicalPose(Movement.ITIDAL))
     }
 
     @Test
-    fun `Ruku maps to BOWING`() {
-        assertEquals(PhysicalPose.BOWING, movementToPhysicalPose("Ruku"))
+    fun `RUKU maps to BOWING`() {
+        assertEquals(PhysicalPose.BOWING, movementToPhysicalPose(Movement.RUKU))
     }
 
     @Test
-    fun `Sujud maps to PROSTRATING`() {
-        assertEquals(PhysicalPose.PROSTRATING, movementToPhysicalPose("Sujud"))
+    fun `SUJUD maps to PROSTRATING`() {
+        assertEquals(PhysicalPose.PROSTRATING, movementToPhysicalPose(Movement.SUJUD))
     }
 
     @Test
-    fun `Jalsa maps to SITTING`() {
-        assertEquals(PhysicalPose.SITTING, movementToPhysicalPose("Jalsa"))
+    fun `JALSA maps to SITTING`() {
+        assertEquals(PhysicalPose.SITTING, movementToPhysicalPose(Movement.JALSA))
     }
 }
