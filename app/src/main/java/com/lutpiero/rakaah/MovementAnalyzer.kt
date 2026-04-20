@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.content.Context
 import android.graphics.ImageFormat
+import android.graphics.Matrix
 import android.graphics.Rect
 import android.graphics.YuvImage
 import android.util.Log
@@ -18,6 +19,7 @@ import com.google.mediapipe.tasks.vision.poselandmarker.PoseLandmarker
 import com.google.mediapipe.tasks.vision.poselandmarker.PoseLandmarkerResult
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
 /**
@@ -32,7 +34,7 @@ import java.util.concurrent.atomic.AtomicReference
 class MovementAnalyzer(
     context: Context,
     private val onPoseChanged: (PhysicalPose) -> Unit,
-    private val onFrameResult: (PhysicalPose, List<NormalizedLandmark>) -> Unit
+    private val onFrameResult: (PhysicalPose, List<NormalizedLandmark>, Int, Int) -> Unit
 ) : ImageAnalysis.Analyzer {
 
     private val detector: PoseLandmarker? = try {
@@ -48,7 +50,7 @@ class MovementAnalyzer(
                 .setResultListener(::handlePoseResult)
                 .setErrorListener { error ->
                     Log.e(TAG, "PoseLandmarker error", error)
-                    onFrameResult(PhysicalPose.UNKNOWN, emptyList())
+                    onFrameResult(PhysicalPose.UNKNOWN, emptyList(), 0, 0)
                 }
                 .build()
         )
@@ -60,6 +62,8 @@ class MovementAnalyzer(
     private val candidatePose = AtomicReference(PhysicalPose.UNKNOWN)
     private val candidateSince = AtomicLong(0L)
     private val currentPose = AtomicReference(PhysicalPose.UNKNOWN)
+    private val latestImageWidth = AtomicInteger(0)
+    private val latestImageHeight = AtomicInteger(0)
 
     @SuppressLint("UnsafeOptInUsageError")
     override fun analyze(imageProxy: ImageProxy) {
@@ -74,7 +78,16 @@ class MovementAnalyzer(
                 Log.e(TAG, "Failed to convert frame to bitmap")
                 return
             }
-            val mpImage = BitmapImageBuilder(bitmap).build()
+            val rotationDegrees = imageProxy.imageInfo.rotationDegrees.toFloat()
+            val rotatedBitmap = if (rotationDegrees != 0f) {
+                val matrix = Matrix().apply { postRotate(rotationDegrees) }
+                Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+            } else {
+                bitmap
+            }
+            latestImageWidth.set(rotatedBitmap.width)
+            latestImageHeight.set(rotatedBitmap.height)
+            val mpImage = BitmapImageBuilder(rotatedBitmap).build()
             val timestampMs = imageProxy.imageInfo.timestamp / 1_000_000L
             detector.detectAsync(mpImage, timestampMs)
         } catch (e: Exception) {
@@ -89,20 +102,47 @@ class MovementAnalyzer(
             return null
         }
 
-        val yBuffer = imageProxy.planes[0].buffer
-        val uBuffer = imageProxy.planes[1].buffer
-        val vBuffer = imageProxy.planes[2].buffer
-        val ySize = yBuffer.remaining()
-        val uSize = uBuffer.remaining()
-        val vSize = vBuffer.remaining()
-        val nv21 = ByteArray(ySize + uSize + vSize)
-        yBuffer.get(nv21, 0, ySize)
-        vBuffer.get(nv21, ySize, vSize)
-        uBuffer.get(nv21, ySize + vSize, uSize)
-        val yuvImage = YuvImage(nv21, ImageFormat.NV21, imageProxy.width, imageProxy.height, null)
-        val out = ByteArrayOutputStream()
-        yuvImage.compressToJpeg(Rect(0, 0, imageProxy.width, imageProxy.height), 100, out)
-        val bytes = out.toByteArray()
+        val width = imageProxy.width
+        val height = imageProxy.height
+        val yPlane = imageProxy.planes[0]
+        val uPlane = imageProxy.planes[1]
+        val vPlane = imageProxy.planes[2]
+        val yBuffer = yPlane.buffer
+        val uBuffer = uPlane.buffer
+        val vBuffer = vPlane.buffer
+        val yRowStride = yPlane.rowStride
+        val uRowStride = uPlane.rowStride
+        val vRowStride = vPlane.rowStride
+        val uPixelStride = uPlane.pixelStride
+        val vPixelStride = vPlane.pixelStride
+
+        val nv21 = ByteArray(width * height * 3 / 2)
+
+        var pos = 0
+        for (row in 0 until height) {
+            yBuffer.position(row * yRowStride)
+            yBuffer.get(nv21, pos, width)
+            pos += width
+        }
+
+        val uvHeight = height / 2
+        val uvWidth = width / 2
+        for (row in 0 until uvHeight) {
+            for (col in 0 until uvWidth) {
+                val vIndex = row * vRowStride + col * vPixelStride
+                val uIndex = row * uRowStride + col * uPixelStride
+                vBuffer.position(vIndex)
+                nv21[pos++] = vBuffer.get()
+                uBuffer.position(uIndex)
+                nv21[pos++] = uBuffer.get()
+            }
+        }
+
+        val yuvImage = YuvImage(nv21, ImageFormat.NV21, width, height, null)
+        val bytes = ByteArrayOutputStream().use { out ->
+            yuvImage.compressToJpeg(Rect(0, 0, width, height), 100, out)
+            out.toByteArray()
+        }
         return BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
     }
 
@@ -113,7 +153,12 @@ class MovementAnalyzer(
         val normalizedPoseLandmarks = result.landmarks().firstOrNull().orEmpty()
         val worldPoseLandmarks = result.worldLandmarks().firstOrNull().orEmpty()
         val detected = PoseClassifier.classify(worldPoseLandmarks, normalizedPoseLandmarks)
-        onFrameResult(detected, normalizedPoseLandmarks)
+        onFrameResult(
+            detected,
+            normalizedPoseLandmarks,
+            latestImageWidth.get(),
+            latestImageHeight.get()
+        )
 
         val now = System.currentTimeMillis()
         val prev = candidatePose.get()

@@ -31,15 +31,21 @@ class OverlayView @JvmOverloads constructor(
     private var landmarks: List<NormalizedLandmark> = emptyList()
     private var connections: List<Connection> = emptyList()
     private var isMirrored = true
+    private var imageWidth = 0
+    private var imageHeight = 0
 
     fun updatePose(
         landmarks: List<NormalizedLandmark>,
         connections: Collection<Connection>,
-        isMirrored: Boolean
+        isMirrored: Boolean,
+        imageWidth: Int,
+        imageHeight: Int
     ) {
         this.landmarks = landmarks
         this.connections = connections.toList()
         this.isMirrored = isMirrored
+        this.imageWidth = imageWidth
+        this.imageHeight = imageHeight
         postInvalidateOnAnimation()
     }
 
@@ -71,12 +77,37 @@ class OverlayView @JvmOverloads constructor(
         }
     }
 
-    private fun mapX(normalizedX: Float): Float {
-        val x = if (isMirrored) 1f - normalizedX else normalizedX
-        return x * width
+    private fun computeTransform(): Triple<Float, Float, Float> {
+        if (imageWidth == 0 || imageHeight == 0 || width == 0 || height == 0) {
+            return Triple(1f, 0f, 0f)
+        }
+
+        val viewAspect = width.toFloat() / height.toFloat()
+        val imageAspect = imageWidth.toFloat() / imageHeight.toFloat()
+
+        return if (imageAspect > viewAspect) {
+            val scale = height.toFloat() / imageHeight.toFloat()
+            val offsetX = (width - imageWidth * scale) / 2f
+            Triple(scale, offsetX, 0f)
+        } else {
+            val scale = width.toFloat() / imageWidth.toFloat()
+            val offsetY = (height - imageHeight * scale) / 2f
+            Triple(scale, 0f, offsetY)
+        }
     }
 
-    private fun mapY(normalizedY: Float): Float = normalizedY * height
+    private fun mapX(normalizedX: Float): Float {
+        val x = if (isMirrored) 1f - normalizedX else normalizedX
+        if (imageWidth == 0) return x * width
+        val (scale, offsetX, _) = computeTransform()
+        return x * imageWidth * scale + offsetX
+    }
+
+    private fun mapY(normalizedY: Float): Float {
+        if (imageHeight == 0) return normalizedY * height
+        val (scale, _, offsetY) = computeTransform()
+        return normalizedY * imageHeight * scale + offsetY
+    }
 
     companion object {
         private const val POINT_RADIUS_RATIO = 0.008f
