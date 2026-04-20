@@ -79,11 +79,15 @@ class MovementAnalyzer(
                 return
             }
             val rotationDegrees = imageProxy.imageInfo.rotationDegrees.toFloat()
-            val rotatedBitmap = if (rotationDegrees != 0f) {
+            val shouldRotate = rotationDegrees != 0f
+            val rotatedBitmap = if (shouldRotate) {
                 val matrix = Matrix().apply { postRotate(rotationDegrees) }
                 Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
             } else {
                 bitmap
+            }
+            if (shouldRotate) {
+                bitmap.recycle()
             }
             latestImageWidth.set(rotatedBitmap.width)
             latestImageHeight.set(rotatedBitmap.height)
@@ -116,13 +120,19 @@ class MovementAnalyzer(
         val uPixelStride = uPlane.pixelStride
         val vPixelStride = vPlane.pixelStride
 
-        val nv21 = ByteArray(width * height * 3 / 2)
+        val nv21 = ByteArray(width * height * NV21_SIZE_NUMERATOR / NV21_SIZE_DENOMINATOR)
 
         var pos = 0
-        for (row in 0 until height) {
-            yBuffer.position(row * yRowStride)
-            yBuffer.get(nv21, pos, width)
-            pos += width
+        if (yRowStride == width) {
+            yBuffer.position(0)
+            yBuffer.get(nv21, 0, width * height)
+            pos = width * height
+        } else {
+            for (row in 0 until height) {
+                yBuffer.position(row * yRowStride)
+                yBuffer.get(nv21, pos, width)
+                pos += width
+            }
         }
 
         val uvHeight = height / 2
@@ -189,6 +199,8 @@ class MovementAnalyzer(
     companion object {
         /** Minimum time (ms) a pose must be held before it is considered stable. */
         private const val HOLD_DURATION_MS = 600L
+        private const val NV21_SIZE_NUMERATOR = 3
+        private const val NV21_SIZE_DENOMINATOR = 2
         /** MediaPipe pose model file in app/src/main/assets/. */
         private const val MODEL_ASSET_NAME = "pose_landmarker_lite.task"
         private const val TAG = "MovementAnalyzer"

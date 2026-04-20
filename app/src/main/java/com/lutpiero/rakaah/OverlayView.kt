@@ -33,6 +33,10 @@ class OverlayView @JvmOverloads constructor(
     private var isMirrored = true
     private var imageWidth = 0
     private var imageHeight = 0
+    private var drawScale = 1f
+    private var drawOffsetX = 0f
+    private var drawOffsetY = 0f
+    private var transformDirty = true
 
     fun updatePose(
         landmarks: List<NormalizedLandmark>,
@@ -46,12 +50,15 @@ class OverlayView @JvmOverloads constructor(
         this.isMirrored = isMirrored
         this.imageWidth = imageWidth
         this.imageHeight = imageHeight
+        transformDirty = true
         postInvalidateOnAnimation()
     }
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         if (landmarks.isEmpty()) return
+
+        ensureTransform()
 
         val radius = min(width, height) * POINT_RADIUS_RATIO
 
@@ -77,6 +84,20 @@ class OverlayView @JvmOverloads constructor(
         }
     }
 
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        transformDirty = true
+    }
+
+    private fun ensureTransform() {
+        if (!transformDirty) return
+        val (scale, offsetX, offsetY) = computeTransform()
+        drawScale = scale
+        drawOffsetX = offsetX
+        drawOffsetY = offsetY
+        transformDirty = false
+    }
+
     private fun computeTransform(): Triple<Float, Float, Float> {
         if (imageWidth == 0 || imageHeight == 0 || width == 0 || height == 0) {
             return Triple(1f, 0f, 0f)
@@ -99,14 +120,12 @@ class OverlayView @JvmOverloads constructor(
     private fun mapX(normalizedX: Float): Float {
         val x = if (isMirrored) 1f - normalizedX else normalizedX
         if (imageWidth == 0) return x * width
-        val (scale, offsetX, _) = computeTransform()
-        return x * imageWidth * scale + offsetX
+        return x * imageWidth * drawScale + drawOffsetX
     }
 
     private fun mapY(normalizedY: Float): Float {
         if (imageHeight == 0) return normalizedY * height
-        val (scale, _, offsetY) = computeTransform()
-        return normalizedY * imageHeight * scale + offsetY
+        return normalizedY * imageHeight * drawScale + drawOffsetY
     }
 
     companion object {
