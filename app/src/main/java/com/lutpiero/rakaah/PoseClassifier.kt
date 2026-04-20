@@ -23,7 +23,9 @@ enum class PhysicalPose {
  */
 object PoseClassifier {
 
-    private const val MIN_PRESENCE = 0.2f
+    // Front-floor capture often loses confidence for partially occluded limbs, so use 0.2f
+    // (instead of 0.4f) to reduce false UNKNOWN classifications during Ruku/Jalsa/Sujud transitions.
+    internal const val MIN_PRESENCE = 0.2f
     private const val STANDING_MIN_KNEE_ANGLE = 140f
     private const val SITTING_MAX_KNEE_ANGLE = 120f
     private const val STANDING_MIN_NOSE_ABOVE_HIP = 0.15f
@@ -37,10 +39,12 @@ object PoseClassifier {
     private const val STANDING_MIN_BODY_HEIGHT = 0.45f
     private const val SITTING_MAX_BODY_HEIGHT = 0.42f
     private const val MIN_BODY_SEGMENT_HEIGHT = 0.05f
+    // Below 7 visible landmarks there usually is not enough structure for full posture geometry.
     private const val MIN_VISIBLE_LANDMARKS_FOR_FULL_CLASSIFICATION = 7
+    // Fallback threshold is slightly lower than full-pose sujud threshold to catch partial-head frames.
     private const val PROSTRATING_FALLBACK_NOSE_Y = 0.72f
     // Highest index used by this classifier is RIGHT_ANKLE (28), so 29 landmarks are required.
-    private const val REQUIRED_LANDMARK_COUNT = 29
+    internal const val REQUIRED_LANDMARK_COUNT = 29
     private const val NOSE = 0
     private const val LEFT_SHOULDER = 11
     private const val RIGHT_SHOULDER = 12
@@ -55,7 +59,7 @@ object PoseClassifier {
         worldLandmarks: List<Landmark>,
         normalizedLandmarks: List<NormalizedLandmark>
     ): PhysicalPose {
-        if (normalizedLandmarks.size <= NOSE) {
+        if (normalizedLandmarks.isEmpty()) {
             return PhysicalPose.UNKNOWN
         }
         if (worldLandmarks.size < REQUIRED_LANDMARK_COUNT || normalizedLandmarks.size < REQUIRED_LANDMARK_COUNT) {
@@ -96,7 +100,11 @@ object PoseClassifier {
         )
 
         return when {
-            noseY >= PROSTRATING_MIN_NOSE_Y || noseAboveHip <= PROSTRATING_MAX_NOSE_ABOVE_HIP ->
+            // Use OR to catch both visible-sujud and partially-visible-sujud scenarios.
+            // Sujud cue 1: nose near frame bottom and body is vertically compressed.
+            // Sujud cue 2: nose collapses close to/below hip height.
+            (noseY >= PROSTRATING_MIN_NOSE_Y && totalBodyHeight < STANDING_MIN_BODY_HEIGHT) ||
+                noseAboveHip <= PROSTRATING_MAX_NOSE_ABOVE_HIP ->
                 PhysicalPose.PROSTRATING
 
             noseAboveHip in BOWING_MIN_NOSE_ABOVE_HIP..BOWING_MAX_NOSE_ABOVE_HIP &&

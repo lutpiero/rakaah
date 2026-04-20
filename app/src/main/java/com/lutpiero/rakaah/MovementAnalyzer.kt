@@ -204,7 +204,7 @@ class MovementAnalyzer(
             return detected
         }
 
-        if (!hasInsufficientLandmarks(normalizedPoseLandmarks)) {
+        if (!hasFewerVisibleLandmarksThanRequired(normalizedPoseLandmarks)) {
             sujudCandidateSince.set(0L)
             return PhysicalPose.UNKNOWN
         }
@@ -228,9 +228,9 @@ class MovementAnalyzer(
         }
     }
 
-    private fun hasInsufficientLandmarks(landmarks: List<NormalizedLandmark>): Boolean {
-        val visibleLandmarks = landmarks.count { it.presence().orElse(0f) >= MIN_LANDMARK_PRESENCE }
-        return visibleLandmarks < REQUIRED_LANDMARK_COUNT
+    private fun hasFewerVisibleLandmarksThanRequired(landmarks: List<NormalizedLandmark>): Boolean {
+        val visibleLandmarkCount = landmarks.count { it.presence().orElse(0f) >= PoseClassifier.MIN_PRESENCE }
+        return visibleLandmarkCount < PoseClassifier.REQUIRED_LANDMARK_COUNT
     }
 
     fun close() {
@@ -240,9 +240,8 @@ class MovementAnalyzer(
     companion object {
         /** Minimum time (ms) a pose must be held before it is considered stable. */
         private const val HOLD_DURATION_MS = 600L
+        // Faster than hold debounce so Sujud can be recognized promptly when landmarks disappear.
         private const val SUJUD_UNKNOWN_TIMEOUT_MS = 400L
-        private const val REQUIRED_LANDMARK_COUNT = 29
-        private const val MIN_LANDMARK_PRESENCE = 0.2f
         private const val NV21_SIZE_NUMERATOR = 3
         private const val NV21_SIZE_DENOMINATOR = 2
         /** MediaPipe pose model file in app/src/main/assets/. */
