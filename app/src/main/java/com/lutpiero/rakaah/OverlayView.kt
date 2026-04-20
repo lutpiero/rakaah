@@ -31,21 +31,34 @@ class OverlayView @JvmOverloads constructor(
     private var landmarks: List<NormalizedLandmark> = emptyList()
     private var connections: List<Connection> = emptyList()
     private var isMirrored = true
+    private var imageWidth = 0
+    private var imageHeight = 0
+    private var drawScale = 1f
+    private var drawOffsetX = 0f
+    private var drawOffsetY = 0f
+    private var transformDirty = true
 
     fun updatePose(
         landmarks: List<NormalizedLandmark>,
         connections: Collection<Connection>,
-        isMirrored: Boolean
+        isMirrored: Boolean,
+        imageWidth: Int,
+        imageHeight: Int
     ) {
         this.landmarks = landmarks
         this.connections = connections.toList()
         this.isMirrored = isMirrored
+        this.imageWidth = imageWidth
+        this.imageHeight = imageHeight
+        transformDirty = true
         postInvalidateOnAnimation()
     }
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         if (landmarks.isEmpty()) return
+
+        ensureTransform()
 
         val radius = min(width, height) * POINT_RADIUS_RATIO
 
@@ -71,12 +84,49 @@ class OverlayView @JvmOverloads constructor(
         }
     }
 
-    private fun mapX(normalizedX: Float): Float {
-        val x = if (isMirrored) 1f - normalizedX else normalizedX
-        return x * width
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        transformDirty = true
     }
 
-    private fun mapY(normalizedY: Float): Float = normalizedY * height
+    private fun ensureTransform() {
+        if (!transformDirty) return
+        val (scale, offsetX, offsetY) = computeTransform()
+        drawScale = scale
+        drawOffsetX = offsetX
+        drawOffsetY = offsetY
+        transformDirty = false
+    }
+
+    private fun computeTransform(): Triple<Float, Float, Float> {
+        if (imageWidth == 0 || imageHeight == 0 || width == 0 || height == 0) {
+            return Triple(1f, 0f, 0f)
+        }
+
+        val viewAspect = width.toFloat() / height.toFloat()
+        val imageAspect = imageWidth.toFloat() / imageHeight.toFloat()
+
+        return if (imageAspect > viewAspect) {
+            val scale = height.toFloat() / imageHeight.toFloat()
+            val offsetX = (width - imageWidth * scale) / 2f
+            Triple(scale, offsetX, 0f)
+        } else {
+            val scale = width.toFloat() / imageWidth.toFloat()
+            val offsetY = (height - imageHeight * scale) / 2f
+            Triple(scale, 0f, offsetY)
+        }
+    }
+
+    private fun mapX(normalizedX: Float): Float {
+        val x = if (isMirrored) 1f - normalizedX else normalizedX
+        if (imageWidth == 0) return x * width
+        return x * imageWidth * drawScale + drawOffsetX
+    }
+
+    private fun mapY(normalizedY: Float): Float {
+        if (imageHeight == 0) return normalizedY * height
+        return normalizedY * imageHeight * drawScale + drawOffsetY
+    }
 
     companion object {
         private const val POINT_RADIUS_RATIO = 0.008f

@@ -91,13 +91,15 @@ class MainActivity : AppCompatActivity() {
                     onPoseChanged = { physicalPose ->
                         runOnUiThread { onCameraPoseDetected(physicalPose) }
                     },
-                    onFrameResult = { physicalPose, landmarks ->
+                    onFrameResult = { physicalPose, landmarks, imageWidth, imageHeight ->
                         runOnUiThread {
                             lastDetectedPose = physicalPose
                             overlayView.updatePose(
                                 landmarks = landmarks,
                                 connections = PoseLandmarker.POSE_LANDMARKS,
-                                isMirrored = true
+                                isMirrored = true,
+                                imageWidth = imageWidth,
+                                imageHeight = imageHeight
                             )
                             renderPoseGuide(physicalPose)
                         }
