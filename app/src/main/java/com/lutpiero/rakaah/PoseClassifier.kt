@@ -23,21 +23,22 @@ enum class PhysicalPose {
  */
 object PoseClassifier {
 
-    private const val MIN_PRESENCE = 0.4f
-    private const val STANDING_MIN_ANGLE = 145f
-    private const val SITTING_MAX_ANGLE = 130f
-    // Ruku typically keeps knees extended while hip flexion is roughly in the 80°-125° range.
-    private const val BOWING_MIN_HIP_ANGLE = 80f
-    private const val BOWING_MAX_HIP_ANGLE = 125f
-    private const val BOWING_MIN_FORWARD_LEAN = 0.14f
-    private const val BOWING_NOSE_ABOVE_HIP_MAX = 0.22f
-    private const val PROSTRATING_NOSE_ABOVE_HIP_MAX = 0.05f
-    private const val PROSTRATING_SHOULDER_ABOVE_HIP_MAX = 0.03f
-    private const val SITTING_MIN_NOSE_ABOVE_HIP = 0.05f
-    private const val STANDING_MIN_NOSE_ABOVE_HIP = 0.28f
-    private const val STANDING_MIN_SHOULDER_ABOVE_HIP = 0.10f
-    private const val STANDING_MIN_UPPER_BODY_RATIO = 0.45f
+    private const val MIN_PRESENCE = 0.2f
+    private const val STANDING_MIN_KNEE_ANGLE = 140f
+    private const val SITTING_MAX_KNEE_ANGLE = 120f
+    private const val STANDING_MIN_NOSE_ABOVE_HIP = 0.15f
+    private const val BOWING_MIN_NOSE_ABOVE_HIP = 0.03f
+    private const val BOWING_MAX_NOSE_ABOVE_HIP = 0.15f
+    private const val SITTING_MIN_NOSE_ABOVE_HIP = 0.08f
+    private const val SITTING_MAX_NOSE_ABOVE_HIP = 0.20f
+    private const val PROSTRATING_MAX_NOSE_ABOVE_HIP = 0.03f
+    private const val PROSTRATING_MIN_NOSE_Y = 0.80f
+    private const val BOWING_MAX_SHOULDER_ABOVE_HIP = 0.10f
+    private const val STANDING_MIN_BODY_HEIGHT = 0.45f
+    private const val SITTING_MAX_BODY_HEIGHT = 0.42f
     private const val MIN_BODY_SEGMENT_HEIGHT = 0.05f
+    private const val MIN_VISIBLE_LANDMARKS_FOR_FULL_CLASSIFICATION = 7
+    private const val PROSTRATING_FALLBACK_NOSE_Y = 0.72f
     // Highest index used by this classifier is RIGHT_ANKLE (28), so 29 landmarks are required.
     private const val REQUIRED_LANDMARK_COUNT = 29
     private const val NOSE = 0
@@ -54,15 +55,20 @@ object PoseClassifier {
         worldLandmarks: List<Landmark>,
         normalizedLandmarks: List<NormalizedLandmark>
     ): PhysicalPose {
-        if (worldLandmarks.size < REQUIRED_LANDMARK_COUNT || normalizedLandmarks.size < REQUIRED_LANDMARK_COUNT) {
+        if (normalizedLandmarks.size <= NOSE) {
             return PhysicalPose.UNKNOWN
+        }
+        if (worldLandmarks.size < REQUIRED_LANDMARK_COUNT || normalizedLandmarks.size < REQUIRED_LANDMARK_COUNT) {
+            return classifyByLandmarkCount(normalizedLandmarks)
         }
 
         val required = listOf(
             NOSE, LEFT_SHOULDER, RIGHT_SHOULDER, LEFT_HIP, RIGHT_HIP,
             LEFT_KNEE, RIGHT_KNEE, LEFT_ANKLE, RIGHT_ANKLE
         )
-        if (required.any { !isPresent(normalizedLandmarks[it]) }) return PhysicalPose.UNKNOWN
+        if (required.any { !isPresent(normalizedLandmarks[it]) }) {
+            return classifyByLandmarkCount(normalizedLandmarks)
+        }
 
         val noseY = normalizedLandmarks[NOSE].y()
         val shoulderMidY = average(
@@ -73,26 +79,16 @@ object PoseClassifier {
             normalizedLandmarks[LEFT_HIP].y(),
             normalizedLandmarks[RIGHT_HIP].y()
         )
-        val kneeMidY = average(
-            normalizedLandmarks[LEFT_KNEE].y(),
-            normalizedLandmarks[RIGHT_KNEE].y()
+        val ankleMidY = average(
+            normalizedLandmarks[LEFT_ANKLE].y(),
+            normalizedLandmarks[RIGHT_ANKLE].y()
         )
 
         val noseAboveHip = hipMidY - noseY
         val shoulderAboveHip = hipMidY - shoulderMidY
-        // MediaPipe normalized Y grows downward in-frame, so knee Y is expected to be > nose Y.
-        val totalBodyHeight = kneeMidY - noseY
+        // MediaPipe normalized Y grows downward in-frame, so ankle Y is expected to be > nose Y.
+        val totalBodyHeight = ankleMidY - noseY
         if (totalBodyHeight <= MIN_BODY_SEGMENT_HEIGHT) return PhysicalPose.UNKNOWN
-        val relativeUpperBodyHeight = noseAboveHip / totalBodyHeight
-
-        val noseZ = worldLandmarks[NOSE].z()
-        val hipMidZ = average(worldLandmarks[LEFT_HIP].z(), worldLandmarks[RIGHT_HIP].z())
-        val forwardLean = hipMidZ - noseZ
-
-        val hipAngle = average(
-            jointAngle(worldLandmarks[LEFT_SHOULDER], worldLandmarks[LEFT_HIP], worldLandmarks[LEFT_KNEE]),
-            jointAngle(worldLandmarks[RIGHT_SHOULDER], worldLandmarks[RIGHT_HIP], worldLandmarks[RIGHT_KNEE])
-        )
 
         val kneeAngle = average(
             jointAngle(worldLandmarks[LEFT_HIP], worldLandmarks[LEFT_KNEE], worldLandmarks[LEFT_ANKLE]),
@@ -100,32 +96,41 @@ object PoseClassifier {
         )
 
         return when {
-            noseAboveHip <= PROSTRATING_NOSE_ABOVE_HIP_MAX &&
-                shoulderAboveHip <= PROSTRATING_SHOULDER_ABOVE_HIP_MAX &&
-                kneeAngle < STANDING_MIN_ANGLE ->
+            noseY >= PROSTRATING_MIN_NOSE_Y || noseAboveHip <= PROSTRATING_MAX_NOSE_ABOVE_HIP ->
                 PhysicalPose.PROSTRATING
 
-            forwardLean >= BOWING_MIN_FORWARD_LEAN &&
-                noseAboveHip <= BOWING_NOSE_ABOVE_HIP_MAX &&
-                hipAngle in BOWING_MIN_HIP_ANGLE..BOWING_MAX_HIP_ANGLE &&
-                kneeAngle >= STANDING_MIN_ANGLE ->
+            noseAboveHip in BOWING_MIN_NOSE_ABOVE_HIP..BOWING_MAX_NOSE_ABOVE_HIP &&
+                shoulderAboveHip <= BOWING_MAX_SHOULDER_ABOVE_HIP &&
+                kneeAngle >= STANDING_MIN_KNEE_ANGLE ->
                 PhysicalPose.BOWING
 
-            kneeAngle < SITTING_MAX_ANGLE &&
-                hipAngle < SITTING_MAX_ANGLE &&
+            kneeAngle < SITTING_MAX_KNEE_ANGLE &&
                 noseAboveHip > SITTING_MIN_NOSE_ABOVE_HIP &&
-                noseAboveHip < STANDING_MIN_NOSE_ABOVE_HIP &&
-                shoulderAboveHip > PROSTRATING_SHOULDER_ABOVE_HIP_MAX ->
+                noseAboveHip < SITTING_MAX_NOSE_ABOVE_HIP &&
+                totalBodyHeight <= SITTING_MAX_BODY_HEIGHT ->
                 PhysicalPose.SITTING
 
             noseAboveHip >= STANDING_MIN_NOSE_ABOVE_HIP &&
-                shoulderAboveHip >= STANDING_MIN_SHOULDER_ABOVE_HIP &&
-                relativeUpperBodyHeight >= STANDING_MIN_UPPER_BODY_RATIO &&
-                hipAngle >= STANDING_MIN_ANGLE &&
-                kneeAngle >= STANDING_MIN_ANGLE ->
+                totalBodyHeight >= STANDING_MIN_BODY_HEIGHT &&
+                kneeAngle >= STANDING_MIN_KNEE_ANGLE ->
                 PhysicalPose.STANDING
 
             else -> PhysicalPose.UNKNOWN
+        }
+    }
+
+    private fun classifyByLandmarkCount(normalizedLandmarks: List<NormalizedLandmark>): PhysicalPose {
+        val visibleCount = normalizedLandmarks.count { it.presence().orElse(0f) >= MIN_PRESENCE }
+        val nose = normalizedLandmarks.getOrNull(NOSE)
+        val noseIsVisible = nose?.let(::isPresent) == true
+        val noseY = nose?.y() ?: 0f
+        return if (visibleCount < MIN_VISIBLE_LANDMARKS_FOR_FULL_CLASSIFICATION &&
+            noseIsVisible &&
+            noseY >= PROSTRATING_FALLBACK_NOSE_Y
+        ) {
+            PhysicalPose.PROSTRATING
+        } else {
+            PhysicalPose.UNKNOWN
         }
     }
 

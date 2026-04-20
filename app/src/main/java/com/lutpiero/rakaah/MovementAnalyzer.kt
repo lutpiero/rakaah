@@ -62,6 +62,7 @@ class MovementAnalyzer(
     private val candidatePose = AtomicReference(PhysicalPose.UNKNOWN)
     private val candidateSince = AtomicLong(0L)
     private val currentPose = AtomicReference(PhysicalPose.UNKNOWN)
+    private val sujudCandidateSince = AtomicLong(0L)
     private val latestImageWidth = AtomicInteger(0)
     private val latestImageHeight = AtomicInteger(0)
 
@@ -160,36 +161,76 @@ class MovementAnalyzer(
         result: PoseLandmarkerResult,
         @Suppress("UNUSED_PARAMETER") inputImage: com.google.mediapipe.framework.image.MPImage
     ) {
+        val now = System.currentTimeMillis()
         val normalizedPoseLandmarks = result.landmarks().firstOrNull().orEmpty()
         val worldPoseLandmarks = result.worldLandmarks().firstOrNull().orEmpty()
         val detected = PoseClassifier.classify(worldPoseLandmarks, normalizedPoseLandmarks)
+        val effectiveDetected = maybePromoteUnknownToProstrating(detected, normalizedPoseLandmarks, now)
         onFrameResult(
-            detected,
+            effectiveDetected,
             normalizedPoseLandmarks,
             latestImageWidth.get(),
             latestImageHeight.get()
         )
 
-        val now = System.currentTimeMillis()
         val prev = candidatePose.get()
 
-        if (detected != prev) {
+        if (effectiveDetected != prev) {
             // New candidate — reset hold timer
-            candidatePose.set(detected)
+            candidatePose.set(effectiveDetected)
             candidateSince.set(now)
             return
         }
 
         // Same candidate — check if held long enough
-        if (detected == PhysicalPose.UNKNOWN) return
+        if (effectiveDetected == PhysicalPose.UNKNOWN) return
         if (now - candidateSince.get() < HOLD_DURATION_MS) return
 
         // Stable new pose confirmed
         val current = currentPose.get()
-        if (detected != current) {
-            currentPose.set(detected)
-            onPoseChanged(detected)
+        if (effectiveDetected != current) {
+            currentPose.set(effectiveDetected)
+            onPoseChanged(effectiveDetected)
         }
+    }
+
+    private fun maybePromoteUnknownToProstrating(
+        detected: PhysicalPose,
+        normalizedPoseLandmarks: List<NormalizedLandmark>,
+        now: Long
+    ): PhysicalPose {
+        if (detected != PhysicalPose.UNKNOWN) {
+            sujudCandidateSince.set(0L)
+            return detected
+        }
+
+        if (!hasInsufficientLandmarks(normalizedPoseLandmarks)) {
+            sujudCandidateSince.set(0L)
+            return PhysicalPose.UNKNOWN
+        }
+
+        val previousStablePose = currentPose.get()
+        if (previousStablePose != PhysicalPose.BOWING && previousStablePose != PhysicalPose.SITTING) {
+            sujudCandidateSince.set(0L)
+            return PhysicalPose.UNKNOWN
+        }
+
+        val candidateStart = sujudCandidateSince.get()
+        if (candidateStart == 0L) {
+            sujudCandidateSince.set(now)
+            return PhysicalPose.UNKNOWN
+        }
+
+        return if (now - candidateStart >= SUJUD_UNKNOWN_TIMEOUT_MS) {
+            PhysicalPose.PROSTRATING
+        } else {
+            PhysicalPose.UNKNOWN
+        }
+    }
+
+    private fun hasInsufficientLandmarks(landmarks: List<NormalizedLandmark>): Boolean {
+        val visibleLandmarks = landmarks.count { it.presence().orElse(0f) >= MIN_LANDMARK_PRESENCE }
+        return visibleLandmarks < REQUIRED_LANDMARK_COUNT
     }
 
     fun close() {
@@ -199,6 +240,9 @@ class MovementAnalyzer(
     companion object {
         /** Minimum time (ms) a pose must be held before it is considered stable. */
         private const val HOLD_DURATION_MS = 600L
+        private const val SUJUD_UNKNOWN_TIMEOUT_MS = 400L
+        private const val REQUIRED_LANDMARK_COUNT = 29
+        private const val MIN_LANDMARK_PRESENCE = 0.2f
         private const val NV21_SIZE_NUMERATOR = 3
         private const val NV21_SIZE_DENOMINATOR = 2
         /** MediaPipe pose model file in app/src/main/assets/. */
