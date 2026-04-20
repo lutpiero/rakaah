@@ -19,7 +19,7 @@ enum class PhysicalPose {
 
 /**
  * Classifies a MediaPipe pose into one of the [PhysicalPose] categories
- * for a front-facing camera on the floor using normalized Y position + world Z depth cues.
+ * for a front-facing camera on the floor using normalized Y position cues.
  */
 object PoseClassifier {
 
