@@ -4,7 +4,6 @@ import com.google.mediapipe.tasks.components.containers.Landmark
 import com.google.mediapipe.tasks.components.containers.NormalizedLandmark
 import kotlin.math.PI
 import kotlin.math.acos
-import kotlin.math.min
 import kotlin.math.sqrt
 
 /**
@@ -20,17 +19,28 @@ enum class PhysicalPose {
 
 /**
  * Classifies a MediaPipe pose into one of the [PhysicalPose] categories
- * using 3D joint angles from world landmarks.
+ * for a front-facing camera on the floor using normalized Y position + world Z depth cues.
  */
 object PoseClassifier {
 
     private const val MIN_PRESENCE = 0.4f
     private const val STANDING_MIN_ANGLE = 145f
     private const val SITTING_MAX_ANGLE = 130f
-    private const val BOWING_TRUNK_MIN = 45f
-    private const val PROSTRATING_TRUNK_MIN = 65f
+    // Ruku typically keeps knees extended while hip flexion is roughly in the 80°-125° range.
+    private const val BOWING_MIN_HIP_ANGLE = 80f
+    private const val BOWING_MAX_HIP_ANGLE = 125f
+    private const val BOWING_MIN_FORWARD_LEAN = 0.14f
+    private const val BOWING_NOSE_ABOVE_HIP_MAX = 0.22f
+    private const val PROSTRATING_NOSE_ABOVE_HIP_MAX = 0.05f
+    private const val PROSTRATING_SHOULDER_ABOVE_HIP_MAX = 0.03f
+    private const val SITTING_MIN_NOSE_ABOVE_HIP = 0.05f
+    private const val STANDING_MIN_NOSE_ABOVE_HIP = 0.28f
+    private const val STANDING_MIN_SHOULDER_ABOVE_HIP = 0.10f
+    private const val STANDING_MIN_UPPER_BODY_RATIO = 0.45f
+    private const val MIN_BODY_SEGMENT_HEIGHT = 0.05f
     // Highest index used by this classifier is RIGHT_ANKLE (28), so 29 landmarks are required.
     private const val REQUIRED_LANDMARK_COUNT = 29
+    private const val NOSE = 0
     private const val LEFT_SHOULDER = 11
     private const val RIGHT_SHOULDER = 12
     private const val LEFT_HIP = 23
@@ -49,16 +59,35 @@ object PoseClassifier {
         }
 
         val required = listOf(
-            LEFT_SHOULDER, RIGHT_SHOULDER, LEFT_HIP, RIGHT_HIP,
+            NOSE, LEFT_SHOULDER, RIGHT_SHOULDER, LEFT_HIP, RIGHT_HIP,
             LEFT_KNEE, RIGHT_KNEE, LEFT_ANKLE, RIGHT_ANKLE
         )
         if (required.any { !isPresent(normalizedLandmarks[it]) }) return PhysicalPose.UNKNOWN
 
-        val shoulderMid = midpoint(worldLandmarks[LEFT_SHOULDER], worldLandmarks[RIGHT_SHOULDER])
-        val hipMid = midpoint(worldLandmarks[LEFT_HIP], worldLandmarks[RIGHT_HIP])
-        val verticalAxis = Vec3(0f, 1f, 0f)
-        val rawTrunkAngle = angleBetween(hipMid - shoulderMid, verticalAxis)
-        val trunkInclination = min(rawTrunkAngle, 180f - rawTrunkAngle)
+        val noseY = normalizedLandmarks[NOSE].y()
+        val shoulderMidY = average(
+            normalizedLandmarks[LEFT_SHOULDER].y(),
+            normalizedLandmarks[RIGHT_SHOULDER].y()
+        )
+        val hipMidY = average(
+            normalizedLandmarks[LEFT_HIP].y(),
+            normalizedLandmarks[RIGHT_HIP].y()
+        )
+        val kneeMidY = average(
+            normalizedLandmarks[LEFT_KNEE].y(),
+            normalizedLandmarks[RIGHT_KNEE].y()
+        )
+
+        val noseAboveHip = hipMidY - noseY
+        val shoulderAboveHip = hipMidY - shoulderMidY
+        // MediaPipe normalized Y grows downward in-frame, so knee Y is expected to be > nose Y.
+        val totalBodyHeight = kneeMidY - noseY
+        if (totalBodyHeight <= MIN_BODY_SEGMENT_HEIGHT) return PhysicalPose.UNKNOWN
+        val relativeUpperBodyHeight = noseAboveHip / totalBodyHeight
+
+        val noseZ = worldLandmarks[NOSE].z()
+        val hipMidZ = average(worldLandmarks[LEFT_HIP].z(), worldLandmarks[RIGHT_HIP].z())
+        val forwardLean = hipMidZ - noseZ
 
         val hipAngle = average(
             jointAngle(worldLandmarks[LEFT_SHOULDER], worldLandmarks[LEFT_HIP], worldLandmarks[LEFT_KNEE]),
@@ -71,18 +100,29 @@ object PoseClassifier {
         )
 
         return when {
-            trunkInclination >= PROSTRATING_TRUNK_MIN && kneeAngle < STANDING_MIN_ANGLE ->
+            noseAboveHip <= PROSTRATING_NOSE_ABOVE_HIP_MAX &&
+                shoulderAboveHip <= PROSTRATING_SHOULDER_ABOVE_HIP_MAX &&
+                kneeAngle < STANDING_MIN_ANGLE ->
                 PhysicalPose.PROSTRATING
 
-            trunkInclination >= BOWING_TRUNK_MIN && kneeAngle >= STANDING_MIN_ANGLE ->
+            forwardLean >= BOWING_MIN_FORWARD_LEAN &&
+                noseAboveHip <= BOWING_NOSE_ABOVE_HIP_MAX &&
+                hipAngle in BOWING_MIN_HIP_ANGLE..BOWING_MAX_HIP_ANGLE &&
+                kneeAngle >= STANDING_MIN_ANGLE ->
                 PhysicalPose.BOWING
 
-            trunkInclination < BOWING_TRUNK_MIN &&
+            kneeAngle < SITTING_MAX_ANGLE &&
                 hipAngle < SITTING_MAX_ANGLE &&
-                kneeAngle < SITTING_MAX_ANGLE ->
+                noseAboveHip > SITTING_MIN_NOSE_ABOVE_HIP &&
+                noseAboveHip < STANDING_MIN_NOSE_ABOVE_HIP &&
+                shoulderAboveHip > PROSTRATING_SHOULDER_ABOVE_HIP_MAX ->
                 PhysicalPose.SITTING
 
-            hipAngle >= STANDING_MIN_ANGLE && kneeAngle >= STANDING_MIN_ANGLE ->
+            noseAboveHip >= STANDING_MIN_NOSE_ABOVE_HIP &&
+                shoulderAboveHip >= STANDING_MIN_SHOULDER_ABOVE_HIP &&
+                relativeUpperBodyHeight >= STANDING_MIN_UPPER_BODY_RATIO &&
+                hipAngle >= STANDING_MIN_ANGLE &&
+                kneeAngle >= STANDING_MIN_ANGLE ->
                 PhysicalPose.STANDING
 
             else -> PhysicalPose.UNKNOWN
@@ -92,12 +132,6 @@ object PoseClassifier {
     private fun isPresent(landmark: NormalizedLandmark): Boolean {
         return landmark.presence().orElse(1f) >= MIN_PRESENCE
     }
-
-    private fun midpoint(a: Landmark, b: Landmark): Vec3 = Vec3(
-        x = (a.x() + b.x()) / 2f,
-        y = (a.y() + b.y()) / 2f,
-        z = (a.z() + b.z()) / 2f
-    )
 
     private fun jointAngle(a: Landmark, b: Landmark, c: Landmark): Float {
         val ba = Vec3(a.x() - b.x(), a.y() - b.y(), a.z() - b.z())
@@ -117,7 +151,6 @@ object PoseClassifier {
     private data class Vec3(val x: Float, val y: Float, val z: Float) {
         fun dot(other: Vec3): Float = x * other.x + y * other.y + z * other.z
         fun magnitude(): Float = sqrt(x * x + y * y + z * z)
-        operator fun minus(other: Vec3): Vec3 = Vec3(x - other.x, y - other.y, z - other.z)
     }
 
 }

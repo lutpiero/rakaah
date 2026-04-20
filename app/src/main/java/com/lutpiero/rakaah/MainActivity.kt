@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.util.Log
+import android.view.Surface
 import android.widget.Button
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
@@ -116,6 +117,7 @@ class MainActivity : AppCompatActivity() {
             val imageAnalysis = analyzer?.let {
                 ImageAnalysis.Builder()
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                    .setTargetRotation(Surface.ROTATION_0)
                     .build()
                     .also { analysis -> analysis.setAnalyzer(cameraExecutor, it) }
             }
