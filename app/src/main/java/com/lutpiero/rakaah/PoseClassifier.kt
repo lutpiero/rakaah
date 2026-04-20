@@ -4,7 +4,6 @@ import com.google.mediapipe.tasks.components.containers.Landmark
 import com.google.mediapipe.tasks.components.containers.NormalizedLandmark
 import kotlin.math.PI
 import kotlin.math.acos
-import kotlin.math.max
 import kotlin.math.sqrt
 
 /**
@@ -27,6 +26,7 @@ object PoseClassifier {
     private const val MIN_PRESENCE = 0.4f
     private const val STANDING_MIN_ANGLE = 145f
     private const val SITTING_MAX_ANGLE = 130f
+    // Ruku typically keeps knees extended while hip flexion is roughly in the 80°-125° range.
     private const val BOWING_MIN_HIP_ANGLE = 80f
     private const val BOWING_MAX_HIP_ANGLE = 125f
     private const val BOWING_MIN_FORWARD_LEAN = 0.14f
@@ -37,6 +37,7 @@ object PoseClassifier {
     private const val STANDING_MIN_NOSE_ABOVE_HIP = 0.28f
     private const val STANDING_MIN_SHOULDER_ABOVE_HIP = 0.10f
     private const val STANDING_MIN_UPPER_BODY_RATIO = 0.45f
+    private const val MIN_BODY_SEGMENT_HEIGHT = 0.05f
     // Highest index used by this classifier is RIGHT_ANKLE (28), so 29 landmarks are required.
     private const val REQUIRED_LANDMARK_COUNT = 29
     private const val NOSE = 0
@@ -79,7 +80,10 @@ object PoseClassifier {
 
         val noseAboveHip = hipMidY - noseY
         val shoulderAboveHip = hipMidY - shoulderMidY
-        val upperBodyRatio = noseAboveHip / max(kneeMidY - noseY, 0.01f)
+        // MediaPipe normalized Y grows downward in-frame, so knee Y is expected to be > nose Y.
+        val totalBodyHeight = kneeMidY - noseY
+        if (totalBodyHeight <= MIN_BODY_SEGMENT_HEIGHT) return PhysicalPose.UNKNOWN
+        val relativeUpperBodyHeight = noseAboveHip / totalBodyHeight
 
         val noseZ = worldLandmarks[NOSE].z()
         val hipMidZ = average(worldLandmarks[LEFT_HIP].z(), worldLandmarks[RIGHT_HIP].z())
@@ -108,6 +112,7 @@ object PoseClassifier {
                 PhysicalPose.BOWING
 
             kneeAngle < SITTING_MAX_ANGLE &&
+                hipAngle < SITTING_MAX_ANGLE &&
                 noseAboveHip > SITTING_MIN_NOSE_ABOVE_HIP &&
                 noseAboveHip < STANDING_MIN_NOSE_ABOVE_HIP &&
                 shoulderAboveHip > PROSTRATING_SHOULDER_ABOVE_HIP_MAX ->
@@ -115,7 +120,7 @@ object PoseClassifier {
 
             noseAboveHip >= STANDING_MIN_NOSE_ABOVE_HIP &&
                 shoulderAboveHip >= STANDING_MIN_SHOULDER_ABOVE_HIP &&
-                upperBodyRatio >= STANDING_MIN_UPPER_BODY_RATIO &&
+                relativeUpperBodyHeight >= STANDING_MIN_UPPER_BODY_RATIO &&
                 hipAngle >= STANDING_MIN_ANGLE &&
                 kneeAngle >= STANDING_MIN_ANGLE ->
                 PhysicalPose.STANDING
