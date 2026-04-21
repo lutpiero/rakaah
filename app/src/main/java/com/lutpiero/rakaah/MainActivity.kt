@@ -75,9 +75,17 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        if (movementAnalyzer == null) {
+        val analyzer = movementAnalyzer
+        if (analyzer == null) {
             requestCameraIfNeeded()
+        } else {
+            analyzer.refreshPersonalizedSamples()
         }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        stopCamera()
     }
 
     private fun requestCameraIfNeeded() {

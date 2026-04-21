@@ -85,7 +85,7 @@ class PoseDataStore(context: Context) {
 
         val bytes = json.toString().toByteArray(StandardCharsets.UTF_8)
         require(bytes.size <= MAX_FILE_SIZE_BYTES) {
-            "Pose sample is too large (${bytes.size} bytes)"
+            "Pose sample is too large (${bytes.size} bytes, max allowed: $MAX_FILE_SIZE_BYTES bytes)"
         }
 
         val target = poseFile(pose)
@@ -103,8 +103,7 @@ class PoseDataStore(context: Context) {
     }
 
     fun hasCustomPose(pose: PrayerPose): Boolean {
-        val file = poseFile(pose)
-        return file.exists() && file.length() in 1..MAX_FILE_SIZE_BYTES
+        return loadPoseSample(pose) != null
     }
 
     fun loadAllSamples(): List<StoredPoseSample> {
@@ -140,11 +139,15 @@ class PoseDataStore(context: Context) {
                 x = item.optDouble("x", 0.0).toFloat(),
                 y = item.optDouble("y", 0.0).toFloat(),
                 z = item.optDouble("z", 0.0).toFloat(),
-                visibility = item.optDouble("visibility", Double.NaN).takeIf { !it.isNaN() }?.toFloat(),
-                presence = item.optDouble("presence", Double.NaN).takeIf { !it.isNaN() }?.toFloat()
+                visibility = item.optFloatOrNull("visibility"),
+                presence = item.optFloatOrNull("presence")
             )
         }
         return result
+    }
+
+    private fun JSONObject.optFloatOrNull(key: String): Float? {
+        return optDouble(key, Double.NaN).takeIf { !it.isNaN() }?.toFloat()
     }
 
     private fun List<LandmarkSample>.toJsonArray(): JSONArray {
@@ -174,14 +177,14 @@ class PoseDataStore(context: Context) {
 }
 
 class PersonalizedPoseMatcher(samples: List<PoseDataStore.StoredPoseSample>) {
-    private val samplesByPose = samples.filter { it.normalizedLandmarks.isNotEmpty() }
+    private val validSamples = samples.filter { it.normalizedLandmarks.isNotEmpty() }
 
     fun classify(normalizedLandmarks: List<NormalizedLandmark>): PhysicalPose? {
-        if (normalizedLandmarks.isEmpty() || samplesByPose.isEmpty()) return null
+        if (normalizedLandmarks.isEmpty() || validSamples.isEmpty()) return null
         var bestPose: PhysicalPose? = null
         var bestDistance = Float.MAX_VALUE
 
-        samplesByPose.forEach { sample ->
+        validSamples.forEach { sample ->
             val comparedCount = minOf(sample.normalizedLandmarks.size, normalizedLandmarks.size)
             if (comparedCount < MIN_LANDMARK_COUNT) return@forEach
             var sumSquaredDistance = 0f

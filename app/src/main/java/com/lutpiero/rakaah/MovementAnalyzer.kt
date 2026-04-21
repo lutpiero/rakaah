@@ -38,7 +38,10 @@ class MovementAnalyzer(
     private val onFrameResult: (PhysicalPose, List<NormalizedLandmark>, Int, Int) -> Unit,
     private val onLandmarksDetected: ((PhysicalPose, List<NormalizedLandmark>, List<Landmark>) -> Unit)? = null
 ) : ImageAnalysis.Analyzer {
-    private val personalizedPoseMatcher = PersonalizedPoseMatcher(PoseDataStore(context).loadAllSamples())
+    private val appContext = context.applicationContext
+    private val poseDataStore = PoseDataStore(appContext)
+    @Volatile
+    private var personalizedPoseMatcher: PersonalizedPoseMatcher? = null
 
     private val detector: PoseLandmarker? = try {
         PoseLandmarker.createFromOptions(
@@ -167,7 +170,7 @@ class MovementAnalyzer(
         val now = System.currentTimeMillis()
         val normalizedPoseLandmarks = result.landmarks().firstOrNull().orEmpty()
         val worldPoseLandmarks = result.worldLandmarks().firstOrNull().orEmpty()
-        val detected = personalizedPoseMatcher.classify(normalizedPoseLandmarks)
+        val detected = getPersonalizedPoseMatcher().classify(normalizedPoseLandmarks)
             ?: PoseClassifier.classify(worldPoseLandmarks, normalizedPoseLandmarks)
         val effectiveDetected = maybePromoteUnknownToProstrating(detected, normalizedPoseLandmarks, now)
         onLandmarksDetected?.invoke(effectiveDetected, normalizedPoseLandmarks, worldPoseLandmarks)
@@ -240,6 +243,20 @@ class MovementAnalyzer(
 
     fun close() {
         detector?.close()
+    }
+
+    fun refreshPersonalizedSamples() {
+        personalizedPoseMatcher = null
+    }
+
+    private fun getPersonalizedPoseMatcher(): PersonalizedPoseMatcher {
+        val existingMatcher = personalizedPoseMatcher
+        if (existingMatcher != null) {
+            return existingMatcher
+        }
+        return PersonalizedPoseMatcher(poseDataStore.loadAllSamples()).also {
+            personalizedPoseMatcher = it
+        }
     }
 
     companion object {

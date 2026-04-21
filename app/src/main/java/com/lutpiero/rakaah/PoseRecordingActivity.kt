@@ -3,6 +3,7 @@ package com.lutpiero.rakaah
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.util.Log
 import android.view.Surface
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
@@ -115,7 +116,8 @@ class PoseRecordingActivity : AppCompatActivity() {
             }
             val analyzer = MovementAnalyzer(
                 context = this,
-                onPoseChanged = {},
+                // Recording flow reads live frame classifications directly via onLandmarksDetected.
+                onPoseChanged = { /* no-op */ },
                 onFrameResult = { _, landmarks, imageWidth, imageHeight ->
                     runOnUiThread {
                         overlayView.updatePose(
@@ -145,7 +147,8 @@ class PoseRecordingActivity : AppCompatActivity() {
                 provider.unbindAll()
                 provider.bindToLifecycle(this, CameraSelector.DEFAULT_FRONT_CAMERA, preview, imageAnalysis)
                 statusText.setText(R.string.pose_recording_camera_ready)
-            } catch (_: Exception) {
+            } catch (exception: Exception) {
+                Log.e(TAG, "Failed to start pose recording camera", exception)
                 statusText.setText(R.string.camera_error)
             }
         }, ContextCompat.getMainExecutor(this))
@@ -229,6 +232,7 @@ class PoseRecordingActivity : AppCompatActivity() {
         private val onRecordClick: (PoseDataStore.PrayerPose) -> Unit,
         private val onResetClick: (PoseDataStore.PrayerPose) -> Unit
     ) : RecyclerView.Adapter<PoseRecordingViewHolder>() {
+        private val customStates = poses.associateWith { dataStore.hasCustomPose(it) }.toMutableMap()
 
         override fun onCreateViewHolder(parent: android.view.ViewGroup, viewType: Int): PoseRecordingViewHolder {
             val view = android.view.LayoutInflater.from(parent.context)
@@ -240,11 +244,18 @@ class PoseRecordingActivity : AppCompatActivity() {
 
         override fun onBindViewHolder(holder: PoseRecordingViewHolder, position: Int) {
             val pose = poses[position]
-            holder.bind(pose, dataStore.hasCustomPose(pose), onRecordClick, onResetClick)
+            holder.bind(pose, customStates[pose] == true, onRecordClick, onResetClick)
         }
 
         fun refreshCustomState() {
-            notifyDataSetChanged()
+            poses.forEachIndexed { index, pose ->
+                val oldState = customStates[pose] == true
+                val newState = dataStore.hasCustomPose(pose)
+                if (oldState != newState) {
+                    customStates[pose] = newState
+                    notifyItemChanged(index)
+                }
+            }
         }
     }
 
@@ -281,5 +292,6 @@ class PoseRecordingActivity : AppCompatActivity() {
     companion object {
         private const val REQUIRED_STABLE_DURATION_MS = 2_000L
         private const val STATE_RECORDING_POSE_ID = "state_recording_pose_id"
+        private const val TAG = "PoseRecordingActivity"
     }
 }
