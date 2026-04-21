@@ -108,6 +108,7 @@ class MovementAnalyzer(
         }
     }
 
+    // Keep conversion local because CameraX bitmap-extension APIs vary by resolved version in CI.
     private fun imageProxyToBitmap(imageProxy: ImageProxy): Bitmap? {
         if (imageProxy.format != ImageFormat.YUV_420_888 || imageProxy.planes.size < 3) {
             return null
