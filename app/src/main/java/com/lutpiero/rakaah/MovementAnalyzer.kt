@@ -12,6 +12,7 @@ import android.util.Log
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import com.google.mediapipe.framework.image.BitmapImageBuilder
+import com.google.mediapipe.tasks.components.containers.Landmark
 import com.google.mediapipe.tasks.components.containers.NormalizedLandmark
 import com.google.mediapipe.tasks.core.BaseOptions
 import com.google.mediapipe.tasks.vision.core.RunningMode
@@ -34,8 +35,13 @@ import java.util.concurrent.atomic.AtomicReference
 class MovementAnalyzer(
     context: Context,
     private val onPoseChanged: (PhysicalPose) -> Unit,
-    private val onFrameResult: (PhysicalPose, List<NormalizedLandmark>, Int, Int) -> Unit
+    private val onFrameResult: (PhysicalPose, List<NormalizedLandmark>, Int, Int) -> Unit,
+    private val onLandmarksDetected: ((PhysicalPose, List<NormalizedLandmark>, List<Landmark>) -> Unit)? = null
 ) : ImageAnalysis.Analyzer {
+    private val appContext = context.applicationContext
+    private val poseDataStore = PoseDataStore(appContext)
+    @Volatile
+    private var personalizedPoseMatcher: PersonalizedPoseMatcher? = null
 
     private val detector: PoseLandmarker? = try {
         PoseLandmarker.createFromOptions(
@@ -164,8 +170,10 @@ class MovementAnalyzer(
         val now = System.currentTimeMillis()
         val normalizedPoseLandmarks = result.landmarks().firstOrNull().orEmpty()
         val worldPoseLandmarks = result.worldLandmarks().firstOrNull().orEmpty()
-        val detected = PoseClassifier.classify(worldPoseLandmarks, normalizedPoseLandmarks)
+        val detected = getPersonalizedPoseMatcher().classify(normalizedPoseLandmarks)
+            ?: PoseClassifier.classify(worldPoseLandmarks, normalizedPoseLandmarks)
         val effectiveDetected = maybePromoteUnknownToProstrating(detected, normalizedPoseLandmarks, now)
+        onLandmarksDetected?.invoke(effectiveDetected, normalizedPoseLandmarks, worldPoseLandmarks)
         onFrameResult(
             effectiveDetected,
             normalizedPoseLandmarks,
@@ -235,6 +243,20 @@ class MovementAnalyzer(
 
     fun close() {
         detector?.close()
+    }
+
+    fun refreshPersonalizedSamples() {
+        personalizedPoseMatcher = null
+    }
+
+    private fun getPersonalizedPoseMatcher(): PersonalizedPoseMatcher {
+        val existingMatcher = personalizedPoseMatcher
+        if (existingMatcher != null) {
+            return existingMatcher
+        }
+        return PersonalizedPoseMatcher(poseDataStore.loadAllSamples()).also {
+            personalizedPoseMatcher = it
+        }
     }
 
     companion object {

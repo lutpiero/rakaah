@@ -4,6 +4,9 @@
     <string name="current_movement">Current Movement</string>
     <string name="next_movement">Next (Manual)</string>
     <string name="reset">Reset</string>
+    <string name="record">Record</string>
+    <string name="close">Close</string>
+    <string name="record_personalized_poses">Record personalized poses</string>
     <string name="rakaah_count_format">Rakaah: %1$d</string>
     <string name="camera_active">📷 Camera active — auto-detecting pose</string>
     <string name="camera_starting">📷 Starting camera…</string>
@@ -17,4 +20,30 @@
     <string name="pose_label_prostrating">Prostrating</string>
     <string name="pose_label_sitting">Sitting</string>
     <string name="pose_label_unknown">Unknown</string>
+
+    <string name="pose_recording_title">Personalized pose recording</string>
+    <string name="pose_recording_instruction">Perform the pose and stay still for 2 seconds.</string>
+    <string name="pose_recording_camera_starting">Starting camera…</string>
+    <string name="pose_recording_camera_ready">Camera ready. Select a pose to record.</string>
+    <string name="pose_recording_waiting_format">Recording %1$s. Get into position.</string>
+    <string name="pose_recording_unstable_format">Landmarks not stable for %1$s. Keep full body in frame.</string>
+    <string name="pose_recording_hold_still_format">%1$s detected. Hold still for %2$s seconds.</string>
+    <string name="pose_recording_saved_format">%1$s recorded successfully.</string>
+    <string name="pose_recording_save_failed_format">Failed to save %1$s. Try again.</string>
+    <string name="pose_recording_reset_done_format">%1$s reset to default detection.</string>
+    <string name="pose_recording_reset_failed_format">Could not reset %1$s.</string>
+    <string name="pose_recording_resume_status_format">Continue recording %1$s or choose another pose.</string>
+    <string name="pose_recording_item_custom">Custom data saved</string>
+    <string name="pose_recording_item_default">Using default data</string>
+
+    <string name="prayer_pose_qiyam_start">Standing (Qiyam)</string>
+    <string name="prayer_pose_takbir">Takbir</string>
+    <string name="prayer_pose_qiyam_after_takbir">Standing after Takbir</string>
+    <string name="prayer_pose_ruku">Bowing (Ruku)</string>
+    <string name="prayer_pose_itidal">Standing after bowing (I'tidal)</string>
+    <string name="prayer_pose_sujud_first">Prostrating (Sujud 1)</string>
+    <string name="prayer_pose_jalsa">Sitting (Jalsa)</string>
+    <string name="prayer_pose_sujud_second">Prostrating (Sujud 2)</string>
+    <string name="prayer_pose_tashahhud">Tashahhud (even rakaahs)</string>
+    <string name="prayer_pose_salam">Salam motion</string>
 </resources>
