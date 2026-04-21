@@ -1,6 +1,7 @@
 package com.lutpiero.rakaah
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.util.Log
@@ -30,6 +31,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var cameraStatusText: TextView
     private lateinit var overlayView: OverlayView
     private var lastDetectedPose: PhysicalPose = PhysicalPose.UNKNOWN
+    private var cameraProvider: ProcessCameraProvider? = null
 
     // Permission launcher
     private val cameraPermissionLauncher = registerForActivityResult(
@@ -51,6 +53,7 @@ class MainActivity : AppCompatActivity() {
         overlayView = findViewById(R.id.poseOverlay)
         val nextButton = findViewById<Button>(R.id.nextMovementButton)
         val resetButton = findViewById<Button>(R.id.resetButton)
+        val recordPosesButton = findViewById<Button>(R.id.recordPosesButton)
 
         renderState(movementText, rakaahText, tracker.currentState())
 
@@ -63,8 +66,18 @@ class MainActivity : AppCompatActivity() {
             renderState(movementText, rakaahText, tracker.reset())
             renderPoseGuide(lastDetectedPose)
         }
+        recordPosesButton.setOnClickListener {
+            stopCamera()
+            startActivity(Intent(this, PoseRecordingActivity::class.java))
+        }
 
-        requestCameraIfNeeded()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (movementAnalyzer == null) {
+            requestCameraIfNeeded()
+        }
     }
 
     private fun requestCameraIfNeeded() {
@@ -79,6 +92,7 @@ class MainActivity : AppCompatActivity() {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
         cameraProviderFuture.addListener({
             val cameraProvider = cameraProviderFuture.get()
+            this.cameraProvider = cameraProvider
 
             val preview = Preview.Builder().build().also {
                 it.setSurfaceProvider(
@@ -211,8 +225,14 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        movementAnalyzer?.close()
+        stopCamera()
         cameraExecutor.shutdown()
+    }
+
+    private fun stopCamera() {
+        movementAnalyzer?.close()
+        movementAnalyzer = null
+        cameraProvider?.unbindAll()
     }
 
     companion object {
