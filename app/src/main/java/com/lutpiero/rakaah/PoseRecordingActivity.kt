@@ -257,16 +257,11 @@ class PoseRecordingActivity : AppCompatActivity() {
         val shouldRequireLegs = target.physicalPose == PhysicalPose.STANDING
 
         val missingGroups = missingRequiredGroups(target.physicalPose, targetFrames)
-        val blockingMissingGroups = if (target.physicalPose == PhysicalPose.BOWING) {
-            missingGroups - LandmarkGroup.KNEES
-        } else {
-            missingGroups
-        }
-        val missingLegGroups = blockingMissingGroups.intersect(setOf(LandmarkGroup.KNEES, LandmarkGroup.ANKLES))
+        val missingLegGroups = missingGroups.intersect(setOf(LandmarkGroup.KNEES, LandmarkGroup.ANKLES))
         val failureMessageRes = when {
             !hasAnyLandmarks -> R.string.pose_recording_move_into_frame
             shouldRequireLegs && missingLegGroups.isNotEmpty() -> R.string.pose_recording_missing_legs
-            blockingMissingGroups.isNotEmpty() -> R.string.pose_recording_missing_upper_body
+            missingGroups.isNotEmpty() -> R.string.pose_recording_missing_upper_body
             !hasPoseConsistency && !hasLowMotion -> R.string.pose_recording_hold_pose_steady
             else -> null
         }
@@ -351,17 +346,7 @@ class PoseRecordingActivity : AppCompatActivity() {
         }
         return requiredGroupsForPose(pose).filterTo(mutableSetOf()) { group ->
             val coverage = frames.count { frame ->
-                if (pose == PhysicalPose.BOWING && group == LandmarkGroup.KNEES) {
-                    val hipsVisible = LandmarkGroup.HIPS.indices.all { index ->
-                        isPresent(frame.normalizedLandmarks.getOrNull(index))
-                    }
-                    val anyKneeVisible = LandmarkGroup.KNEES.indices.any { index ->
-                        isPresent(frame.normalizedLandmarks.getOrNull(index))
-                    }
-                    hipsVisible && anyKneeVisible
-                } else {
-                    group.indices.any { index -> isPresent(frame.normalizedLandmarks.getOrNull(index)) }
-                }
+                group.indices.any { index -> isPresent(frame.normalizedLandmarks.getOrNull(index)) }
             }.toFloat() / frames.size
             val minimumCoverage = when {
                 group == LandmarkGroup.KNEES || group == LandmarkGroup.ANKLES -> MIN_LEG_GROUP_COVERAGE_RATIO
@@ -420,7 +405,7 @@ class PoseRecordingActivity : AppCompatActivity() {
         PhysicalPose.STANDING ->
             listOf(LandmarkGroup.HIPS, LandmarkGroup.KNEES, LandmarkGroup.ANKLES)
         PhysicalPose.BOWING ->
-            listOf(LandmarkGroup.SHOULDERS, LandmarkGroup.HIPS, LandmarkGroup.KNEES)
+            listOf(LandmarkGroup.SHOULDERS, LandmarkGroup.HIPS)
         PhysicalPose.SITTING, PhysicalPose.PROSTRATING ->
             listOf(LandmarkGroup.SHOULDERS, LandmarkGroup.HIPS)
         PhysicalPose.UNKNOWN -> emptyList()
@@ -548,6 +533,7 @@ class PoseRecordingActivity : AppCompatActivity() {
         private const val MIN_STABLE_FRAME_COUNT = 4
         // Require landmark groups to be visible in at least 60% of stability-window frames.
         private const val MIN_GROUP_COVERAGE_RATIO = 0.6f
+        // Legs are more often partially occluded/noisy in front floor-camera framing, so use looser coverage.
         private const val MIN_LEG_GROUP_COVERAGE_RATIO = 0.45f
         private const val RECORDING_MIN_CONFIDENCE = 0.12f
         private const val LEFT_SHOULDER = 11
