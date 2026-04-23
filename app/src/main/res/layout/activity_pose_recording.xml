@@ -4,6 +4,13 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent">
 
+    <androidx.constraintlayout.widget.Guideline
+        android:id="@+id/poseRecordingSplitGuideline"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        app:layout_constraintGuide_percent="0.75" />
+
     <androidx.camera.view.PreviewView
         android:id="@+id/poseRecordingPreview"
         android:layout_width="0dp"
@@ -11,8 +18,7 @@
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintBottom_toTopOf="@id/poseRecordingPanel"
-        app:layout_constraintHeight_percent="0.42" />
+        app:layout_constraintBottom_toTopOf="@id/poseRecordingSplitGuideline" />
 
     <com.lutpiero.rakaah.OverlayView
         android:id="@+id/poseRecordingOverlay"
@@ -25,6 +31,22 @@
         app:layout_constraintStart_toStartOf="@id/poseRecordingPreview"
         app:layout_constraintTop_toTopOf="@id/poseRecordingPreview" />
 
+    <TextView
+        android:id="@+id/poseRecordingCountdown"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:background="@android:color/black"
+        android:paddingHorizontal="20dp"
+        android:paddingVertical="10dp"
+        android:textColor="@android:color/white"
+        android:textSize="40sp"
+        android:textStyle="bold"
+        android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="@id/poseRecordingPreview"
+        app:layout_constraintEnd_toEndOf="@id/poseRecordingPreview"
+        app:layout_constraintStart_toStartOf="@id/poseRecordingPreview"
+        app:layout_constraintTop_toTopOf="@id/poseRecordingPreview" />
+
     <com.google.android.material.card.MaterialCardView
         android:id="@+id/poseRecordingPanel"
         android:layout_width="0dp"
@@ -32,7 +54,7 @@
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/poseRecordingPreview">
+        app:layout_constraintTop_toBottomOf="@id/poseRecordingSplitGuideline">
 
         <LinearLayout
             android:layout_width="match_parent"

@@ -3,6 +3,7 @@ package com.lutpiero.rakaah
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.os.CountDownTimer
 import android.util.Log
 import android.view.Surface
 import android.widget.TextView
@@ -17,22 +18,30 @@ import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.button.MaterialButton
+import com.google.mediapipe.tasks.components.containers.Landmark
+import com.google.mediapipe.tasks.components.containers.NormalizedLandmark
 import com.google.mediapipe.tasks.vision.poselandmarker.PoseLandmarker
+import java.util.ArrayDeque
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import kotlin.math.ceil
+import kotlin.math.sqrt
 
 class PoseRecordingActivity : AppCompatActivity() {
     private lateinit var cameraExecutor: ExecutorService
     private lateinit var instructionText: TextView
     private lateinit var statusText: TextView
+    private lateinit var countdownText: TextView
     private lateinit var overlayView: OverlayView
     private lateinit var poseDataStore: PoseDataStore
+    private lateinit var recyclerView: RecyclerView
     private lateinit var adapter: PoseRecordingAdapter
     private var movementAnalyzer: MovementAnalyzer? = null
     private var cameraProvider: ProcessCameraProvider? = null
 
     private var recordingPose: PoseDataStore.PrayerPose? = null
-    private var stableSinceMs: Long = 0L
+    private val recordingFrames = ArrayDeque<RecordingFrame>()
+    private var countdownTimer: CountDownTimer? = null
     private var hasCameraPermission = false
 
     private val cameraPermissionLauncher = registerForActivityResult(
@@ -52,9 +61,10 @@ class PoseRecordingActivity : AppCompatActivity() {
         findViewById<MaterialButton>(R.id.closePoseRecordingButton).setOnClickListener { finish() }
         instructionText = findViewById(R.id.poseRecordingInstruction)
         statusText = findViewById(R.id.poseRecordingStatus)
+        countdownText = findViewById(R.id.poseRecordingCountdown)
         overlayView = findViewById(R.id.poseRecordingOverlay)
 
-        val recyclerView = findViewById<RecyclerView>(R.id.poseRecordingRecycler)
+        recyclerView = findViewById(R.id.poseRecordingRecycler)
         recyclerView.layoutManager = LinearLayoutManager(this)
         adapter = PoseRecordingAdapter(
             poses = PoseDataStore.PrayerPose.entries,
@@ -81,6 +91,7 @@ class PoseRecordingActivity : AppCompatActivity() {
 
     override fun onPause() {
         super.onPause()
+        stopRecording(clearSelection = false)
         stopCamera()
     }
 
@@ -165,17 +176,31 @@ class PoseRecordingActivity : AppCompatActivity() {
             statusText.setText(R.string.camera_permission_denied)
             return
         }
+        stopRecording(clearSelection = true)
         recordingPose = pose
-        stableSinceMs = 0L
+        recordingFrames.clear()
+        setListInteractionEnabled(false)
+        countdownText.text = RECORDING_DURATION_SECONDS.toString()
+        countdownText.visibility = android.view.View.VISIBLE
         instructionText.setText(R.string.pose_recording_instruction)
         statusText.text = getString(R.string.pose_recording_waiting_format, getString(pose.labelResId))
+        countdownTimer = object : CountDownTimer(REQUIRED_STABLE_DURATION_MS, ONE_SECOND_MS) {
+            override fun onTick(millisUntilFinished: Long) {
+                val remainingSeconds = ceil(millisUntilFinished / ONE_SECOND_MS.toFloat()).toInt()
+                countdownText.text = remainingSeconds.toString()
+            }
+
+            override fun onFinish() {
+                countdownText.text = "0"
+                finalizeRecording()
+            }
+        }.start()
     }
 
     private fun resetPose(pose: PoseDataStore.PrayerPose) {
         if (poseDataStore.deletePoseSample(pose)) {
             if (recordingPose == pose) {
-                recordingPose = null
-                stableSinceMs = 0L
+                stopRecording(clearSelection = true)
             }
             statusText.text = getString(R.string.pose_recording_reset_done_format, getString(pose.labelResId))
             adapter.refreshCustomState()
@@ -186,44 +211,206 @@ class PoseRecordingActivity : AppCompatActivity() {
 
     private fun maybePersistRecording(
         detectedPose: PhysicalPose,
-        normalizedLandmarks: List<com.google.mediapipe.tasks.components.containers.NormalizedLandmark>,
-        worldLandmarks: List<com.google.mediapipe.tasks.components.containers.Landmark>
+        normalizedLandmarks: List<NormalizedLandmark>,
+        worldLandmarks: List<Landmark>
     ) {
         val target = recordingPose ?: return
-        if (detectedPose != target.physicalPose || normalizedLandmarks.isEmpty()) {
-            stableSinceMs = 0L
-            statusText.text = getString(R.string.pose_recording_unstable_format, getString(target.labelResId))
-            return
-        }
+        if (countdownTimer == null) return
 
         val now = System.currentTimeMillis()
-        if (stableSinceMs == 0L) stableSinceMs = now
-        val elapsed = now - stableSinceMs
-        if (elapsed < REQUIRED_STABLE_DURATION_MS) {
-            val remaining = ((REQUIRED_STABLE_DURATION_MS - elapsed) / 1000f).coerceAtLeast(0f)
-            statusText.text = getString(
-                R.string.pose_recording_hold_still_format,
-                getString(target.labelResId),
-                String.format("%.1f", remaining)
+        recordingFrames.addLast(
+            RecordingFrame(
+                timestampMs = now,
+                detectedPose = detectedPose,
+                normalizedLandmarks = normalizedLandmarks,
+                worldLandmarks = worldLandmarks
+            )
+        )
+        trimFrameBuffer(now)
+
+        if (detectedPose != target.physicalPose) {
+            statusText.setText(
+                if (normalizedLandmarks.isEmpty()) {
+                    R.string.pose_recording_move_into_frame
+                } else {
+                    R.string.pose_recording_hold_pose_steady
+                }
             )
             return
         }
+        statusText.text = getString(R.string.pose_recording_hold_pose_steady)
+    }
 
-        val saveResult = poseDataStore.savePoseSample(target, normalizedLandmarks, worldLandmarks)
-        if (saveResult.isSuccess) {
-            statusText.text = getString(
-                R.string.pose_recording_saved_format,
-                getString(target.labelResId)
-            )
-            recordingPose = null
-            stableSinceMs = 0L
-            adapter.refreshCustomState()
-        } else {
-            statusText.text = getString(
-                R.string.pose_recording_save_failed_format,
-                getString(target.labelResId)
-            )
+    private fun finalizeRecording() {
+        val target = recordingPose ?: return stopRecording(clearSelection = true)
+        val now = System.currentTimeMillis()
+        trimFrameBuffer(now)
+        val stableWindowStart = now - STABILITY_WINDOW_MS
+        val stableWindow = recordingFrames.filter { it.timestampMs >= stableWindowStart }
+        val targetFrames = stableWindow.filter { it.detectedPose == target.physicalPose && it.normalizedLandmarks.isNotEmpty() }
+        val hasAnyLandmarks = stableWindow.any { it.normalizedLandmarks.isNotEmpty() }
+        val hasPoseConsistency = stableWindow.isNotEmpty() &&
+            stableWindow.count { it.detectedPose == target.physicalPose } / stableWindow.size.toFloat() >= MIN_POSE_MATCH_RATIO
+        val hasLowMotion = hasLowMotionStreak(targetFrames)
+
+        val missingGroups = missingRequiredGroups(target.physicalPose, targetFrames)
+        val missingLegGroups = missingGroups.intersect(setOf(LandmarkGroup.KNEES, LandmarkGroup.ANKLES))
+        val failureMessageRes = when {
+            !hasAnyLandmarks -> R.string.pose_recording_move_into_frame
+            missingLegGroups.isNotEmpty() -> R.string.pose_recording_missing_legs
+            missingGroups.isNotEmpty() -> R.string.pose_recording_missing_upper_body
+            !hasPoseConsistency && !hasLowMotion -> R.string.pose_recording_hold_pose_steady
+            else -> null
         }
+
+        if (failureMessageRes != null) {
+            statusText.setText(failureMessageRes)
+            stopRecording(clearSelection = true)
+            return
+        }
+
+        val representativeFrame = selectRepresentativeFrame(targetFrames)
+        val saveResult = poseDataStore.savePoseSample(
+            target,
+            representativeFrame.normalizedLandmarks,
+            representativeFrame.worldLandmarks
+        )
+        if (saveResult.isSuccess) {
+            statusText.text = getString(R.string.pose_recording_saved_format, getString(target.labelResId))
+            adapter.refreshCustomState()
+            movementAnalyzer?.refreshPersonalizedSamples()
+        } else {
+            statusText.text = getString(R.string.pose_recording_save_failed_format, getString(target.labelResId))
+        }
+        stopRecording(clearSelection = true)
+    }
+
+    private fun trimFrameBuffer(now: Long) {
+        while (recordingFrames.isNotEmpty() && now - recordingFrames.first().timestampMs > FRAME_BUFFER_WINDOW_MS) {
+            recordingFrames.removeFirst()
+        }
+    }
+
+    private fun hasLowMotionStreak(frames: List<RecordingFrame>): Boolean {
+        if (frames.size < MIN_STABLE_FRAME_COUNT) return false
+        var stableCount = 1
+        var previous = frames.first()
+        for (index in 1 until frames.size) {
+            val current = frames[index]
+            val delta = averageLandmarkDelta(previous.normalizedLandmarks, current.normalizedLandmarks)
+            if (delta <= MAX_AVERAGE_LANDMARK_DELTA) {
+                stableCount += 1
+                if (stableCount >= MIN_STABLE_FRAME_COUNT) return true
+            } else {
+                stableCount = 1
+            }
+            previous = current
+        }
+        return false
+    }
+
+    private fun averageLandmarkDelta(
+        previous: List<NormalizedLandmark>,
+        current: List<NormalizedLandmark>
+    ): Float {
+        val count = minOf(previous.size, current.size)
+        if (count == 0) return Float.MAX_VALUE
+        var sum = 0f
+        var used = 0
+        for (index in 0 until count) {
+            val prev = previous[index]
+            val now = current[index]
+            if (!isPresent(prev) || !isPresent(now)) continue
+            val dx = now.x() - prev.x()
+            val dy = now.y() - prev.y()
+            sum += sqrt(dx * dx + dy * dy)
+            used += 1
+        }
+        return if (used == 0) Float.MAX_VALUE else sum / used.toFloat()
+    }
+
+    private fun missingRequiredGroups(
+        pose: PhysicalPose,
+        frames: List<RecordingFrame>
+    ): Set<LandmarkGroup> {
+        if (frames.isEmpty()) {
+            return requiredGroupsForPose(pose).toSet()
+        }
+        return requiredGroupsForPose(pose).filterTo(mutableSetOf()) { group ->
+            val coverage = frames.count { frame ->
+                group.indices.any { index -> isPresent(frame.normalizedLandmarks.getOrNull(index)) }
+            } / frames.size.toFloat()
+            coverage < MIN_GROUP_COVERAGE_RATIO
+        }
+    }
+
+    private fun selectRepresentativeFrame(frames: List<RecordingFrame>): RecordingFrame {
+        if (frames.isEmpty()) {
+            return recordingFrames.lastOrNull() ?: throw IllegalStateException("No recording frames captured")
+        }
+        val averages = Array<FloatArray?>(MAX_LANDMARK_INDEX + 1) { null }
+        for (landmarkIndex in 0..MAX_LANDMARK_INDEX) {
+            var sumX = 0f
+            var sumY = 0f
+            var count = 0
+            frames.forEach { frame ->
+                val landmark = frame.normalizedLandmarks.getOrNull(landmarkIndex)
+                if (isPresent(landmark)) {
+                    sumX += landmark!!.x()
+                    sumY += landmark.y()
+                    count += 1
+                }
+            }
+            if (count > 0) {
+                averages[landmarkIndex] = floatArrayOf(sumX / count, sumY / count)
+            }
+        }
+
+        return frames.minByOrNull { frame ->
+            var total = 0f
+            var used = 0
+            for (landmarkIndex in 0..MAX_LANDMARK_INDEX) {
+                val average = averages[landmarkIndex] ?: continue
+                val landmark = frame.normalizedLandmarks.getOrNull(landmarkIndex) ?: continue
+                if (!isPresent(landmark)) continue
+                val dx = landmark.x() - average[0]
+                val dy = landmark.y() - average[1]
+                total += (dx * dx) + (dy * dy)
+                used += 1
+            }
+            if (used == 0) Float.MAX_VALUE else total / used
+        } ?: frames.last()
+    }
+
+    private fun isPresent(landmark: NormalizedLandmark?): Boolean {
+        if (landmark == null) return false
+        val presence = landmark.presence().orElse(0f)
+        val visibility = landmark.visibility().orElse(0f)
+        return maxOf(presence, visibility) >= RECORDING_MIN_CONFIDENCE
+    }
+
+    private fun requiredGroupsForPose(pose: PhysicalPose): List<LandmarkGroup> = when (pose) {
+        PhysicalPose.STANDING, PhysicalPose.BOWING ->
+            listOf(LandmarkGroup.HIPS, LandmarkGroup.KNEES, LandmarkGroup.ANKLES)
+        PhysicalPose.SITTING, PhysicalPose.PROSTRATING ->
+            listOf(LandmarkGroup.SHOULDERS, LandmarkGroup.HIPS)
+        PhysicalPose.UNKNOWN -> emptyList()
+    }
+
+    private fun stopRecording(clearSelection: Boolean) {
+        countdownTimer?.cancel()
+        countdownTimer = null
+        countdownText.visibility = android.view.View.GONE
+        recordingFrames.clear()
+        setListInteractionEnabled(true)
+        if (clearSelection) {
+            recordingPose = null
+        }
+    }
+
+    private fun setListInteractionEnabled(enabled: Boolean) {
+        recyclerView.isEnabled = enabled
+        adapter.setInteractionEnabled(enabled)
     }
 
     private class PoseRecordingAdapter(
@@ -233,6 +420,7 @@ class PoseRecordingActivity : AppCompatActivity() {
         private val onResetClick: (PoseDataStore.PrayerPose) -> Unit
     ) : RecyclerView.Adapter<PoseRecordingViewHolder>() {
         private val customStates = poses.associateWith { dataStore.hasCustomPose(it) }.toMutableMap()
+        private var interactionsEnabled = true
 
         override fun onCreateViewHolder(parent: android.view.ViewGroup, viewType: Int): PoseRecordingViewHolder {
             val view = android.view.LayoutInflater.from(parent.context)
@@ -244,7 +432,13 @@ class PoseRecordingActivity : AppCompatActivity() {
 
         override fun onBindViewHolder(holder: PoseRecordingViewHolder, position: Int) {
             val pose = poses[position]
-            holder.bind(pose, customStates[pose] == true, onRecordClick, onResetClick)
+            holder.bind(
+                pose = pose,
+                hasCustomData = customStates[pose] == true,
+                interactionsEnabled = interactionsEnabled,
+                onRecordClick = onRecordClick,
+                onResetClick = onResetClick
+            )
         }
 
         fun refreshCustomState() {
@@ -256,6 +450,12 @@ class PoseRecordingActivity : AppCompatActivity() {
                     notifyItemChanged(index)
                 }
             }
+        }
+
+        fun setInteractionEnabled(enabled: Boolean) {
+            if (interactionsEnabled == enabled) return
+            interactionsEnabled = enabled
+            notifyDataSetChanged()
         }
     }
 
@@ -269,6 +469,7 @@ class PoseRecordingActivity : AppCompatActivity() {
         fun bind(
             pose: PoseDataStore.PrayerPose,
             hasCustomData: Boolean,
+            interactionsEnabled: Boolean,
             onRecordClick: (PoseDataStore.PrayerPose) -> Unit,
             onResetClick: (PoseDataStore.PrayerPose) -> Unit
         ) {
@@ -283,14 +484,47 @@ class PoseRecordingActivity : AppCompatActivity() {
                     if (hasCustomData) R.color.pose_recording_custom else R.color.pose_recording_default
                 )
             )
-            recordButton.setOnClickListener { onRecordClick(pose) }
-            resetButton.isEnabled = hasCustomData
-            resetButton.setOnClickListener { onResetClick(pose) }
+            recordButton.isEnabled = interactionsEnabled
+            recordButton.setOnClickListener { if (interactionsEnabled) onRecordClick(pose) }
+            resetButton.isEnabled = interactionsEnabled && hasCustomData
+            resetButton.setOnClickListener { if (interactionsEnabled) onResetClick(pose) }
         }
     }
 
+    private data class RecordingFrame(
+        val timestampMs: Long,
+        val detectedPose: PhysicalPose,
+        val normalizedLandmarks: List<NormalizedLandmark>,
+        val worldLandmarks: List<Landmark>
+    )
+
+    private enum class LandmarkGroup(val indices: IntArray) {
+        SHOULDERS(intArrayOf(LEFT_SHOULDER, RIGHT_SHOULDER)),
+        HIPS(intArrayOf(LEFT_HIP, RIGHT_HIP)),
+        KNEES(intArrayOf(LEFT_KNEE, RIGHT_KNEE)),
+        ANKLES(intArrayOf(LEFT_ANKLE, RIGHT_ANKLE))
+    }
+
     companion object {
-        private const val REQUIRED_STABLE_DURATION_MS = 2_000L
+        private const val REQUIRED_STABLE_DURATION_MS = 5_000L
+        private const val ONE_SECOND_MS = 1_000L
+        private const val STABILITY_WINDOW_MS = 1_000L
+        private const val FRAME_BUFFER_WINDOW_MS = 5_000L
+        private const val RECORDING_DURATION_SECONDS = 5
+        private const val MAX_AVERAGE_LANDMARK_DELTA = 0.03f
+        private const val MIN_POSE_MATCH_RATIO = 0.7f
+        private const val MIN_STABLE_FRAME_COUNT = 4
+        private const val MIN_GROUP_COVERAGE_RATIO = 0.6f
+        private const val RECORDING_MIN_CONFIDENCE = 0.12f
+        private const val LEFT_SHOULDER = 11
+        private const val RIGHT_SHOULDER = 12
+        private const val LEFT_HIP = 23
+        private const val RIGHT_HIP = 24
+        private const val LEFT_KNEE = 25
+        private const val RIGHT_KNEE = 26
+        private const val LEFT_ANKLE = 27
+        private const val RIGHT_ANKLE = 28
+        private const val MAX_LANDMARK_INDEX = RIGHT_ANKLE
         private const val STATE_RECORDING_POSE_ID = "state_recording_pose_id"
         private const val TAG = "PoseRecordingActivity"
     }

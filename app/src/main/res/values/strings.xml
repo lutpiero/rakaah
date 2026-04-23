@@ -22,12 +22,16 @@
     <string name="pose_label_unknown">Unknown</string>
 
     <string name="pose_recording_title">Personalized pose recording</string>
-    <string name="pose_recording_instruction">Perform the pose and stay still for 2 seconds.</string>
+    <string name="pose_recording_instruction">Perform the pose and hold it steady while recording for 5 seconds.</string>
     <string name="pose_recording_camera_starting">Starting camera…</string>
     <string name="pose_recording_camera_ready">Camera ready. Select a pose to record.</string>
     <string name="pose_recording_waiting_format">Recording %1$s. Get into position.</string>
     <string name="pose_recording_unstable_format">Landmarks not stable for %1$s. Keep full body in frame.</string>
     <string name="pose_recording_hold_still_format">%1$s detected. Hold still for %2$s seconds.</string>
+    <string name="pose_recording_move_into_frame">Move into frame.</string>
+    <string name="pose_recording_missing_legs">Can’t see legs (knees/ankles). Step back.</string>
+    <string name="pose_recording_missing_upper_body">Need shoulders and hips visible. Move into frame.</string>
+    <string name="pose_recording_hold_pose_steady">Hold the pose steady.</string>
     <string name="pose_recording_saved_format">%1$s recorded successfully.</string>
     <string name="pose_recording_save_failed_format">Failed to save %1$s. Try again.</string>
     <string name="pose_recording_reset_done_format">%1$s reset to default detection.</string>
