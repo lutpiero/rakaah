@@ -186,7 +186,9 @@ class PoseRecordingActivity : AppCompatActivity() {
         statusText.text = getString(R.string.pose_recording_waiting_format, getString(pose.labelResId))
         countdownTimer = object : CountDownTimer(REQUIRED_STABLE_DURATION_MS, ONE_SECOND_MS) {
             override fun onTick(millisUntilFinished: Long) {
-                val remainingSeconds = ceil(millisUntilFinished / ONE_SECOND_MS.toFloat()).toInt()
+                val remainingSeconds = ceil(millisUntilFinished / ONE_SECOND_MS.toDouble())
+                    .toInt()
+                    .coerceIn(1, RECORDING_DURATION_SECONDS)
                 countdownText.text = remainingSeconds.toString()
             }
 
@@ -250,7 +252,7 @@ class PoseRecordingActivity : AppCompatActivity() {
         val targetFrames = stableWindow.filter { it.detectedPose == target.physicalPose && it.normalizedLandmarks.isNotEmpty() }
         val hasAnyLandmarks = stableWindow.any { it.normalizedLandmarks.isNotEmpty() }
         val hasPoseConsistency = stableWindow.isNotEmpty() &&
-            stableWindow.count { it.detectedPose == target.physicalPose } / stableWindow.size.toFloat() >= MIN_POSE_MATCH_RATIO
+            stableWindow.count { it.detectedPose == target.physicalPose }.toFloat() / stableWindow.size >= MIN_POSE_MATCH_RATIO
         val hasLowMotion = hasLowMotionStreak(targetFrames)
 
         val missingGroups = missingRequiredGroups(target.physicalPose, targetFrames)
@@ -265,6 +267,12 @@ class PoseRecordingActivity : AppCompatActivity() {
 
         if (failureMessageRes != null) {
             statusText.setText(failureMessageRes)
+            stopRecording(clearSelection = true)
+            return
+        }
+
+        if (targetFrames.isEmpty()) {
+            statusText.setText(R.string.pose_recording_hold_pose_steady)
             stopRecording(clearSelection = true)
             return
         }
@@ -293,18 +301,17 @@ class PoseRecordingActivity : AppCompatActivity() {
 
     private fun hasLowMotionStreak(frames: List<RecordingFrame>): Boolean {
         if (frames.size < MIN_STABLE_FRAME_COUNT) return false
-        var stableCount = 1
-        var previous = frames.first()
+        var stableTransitions = 0
         for (index in 1 until frames.size) {
+            val previous = frames[index - 1]
             val current = frames[index]
             val delta = averageLandmarkDelta(previous.normalizedLandmarks, current.normalizedLandmarks)
             if (delta <= MAX_AVERAGE_LANDMARK_DELTA) {
-                stableCount += 1
-                if (stableCount >= MIN_STABLE_FRAME_COUNT) return true
+                stableTransitions += 1
+                if (stableTransitions >= MIN_STABLE_FRAME_COUNT - 1) return true
             } else {
-                stableCount = 1
+                stableTransitions = 0
             }
-            previous = current
         }
         return false
     }
@@ -314,7 +321,7 @@ class PoseRecordingActivity : AppCompatActivity() {
         current: List<NormalizedLandmark>
     ): Float {
         val count = minOf(previous.size, current.size)
-        if (count == 0) return Float.MAX_VALUE
+        if (count == 0) return INVALID_DELTA
         var sum = 0f
         var used = 0
         for (index in 0 until count) {
@@ -326,7 +333,7 @@ class PoseRecordingActivity : AppCompatActivity() {
             sum += sqrt(dx * dx + dy * dy)
             used += 1
         }
-        return if (used == 0) Float.MAX_VALUE else sum / used.toFloat()
+        return if (used == 0) INVALID_DELTA else sum / used.toFloat()
     }
 
     private fun missingRequiredGroups(
@@ -339,24 +346,24 @@ class PoseRecordingActivity : AppCompatActivity() {
         return requiredGroupsForPose(pose).filterTo(mutableSetOf()) { group ->
             val coverage = frames.count { frame ->
                 group.indices.any { index -> isPresent(frame.normalizedLandmarks.getOrNull(index)) }
-            } / frames.size.toFloat()
+            }.toFloat() / frames.size
             coverage < MIN_GROUP_COVERAGE_RATIO
         }
     }
 
     private fun selectRepresentativeFrame(frames: List<RecordingFrame>): RecordingFrame {
-        if (frames.isEmpty()) {
-            return recordingFrames.lastOrNull() ?: throw IllegalStateException("No recording frames captured")
-        }
-        val averages = Array<FloatArray?>(MAX_LANDMARK_INDEX + 1) { null }
-        for (landmarkIndex in 0..MAX_LANDMARK_INDEX) {
+        require(frames.isNotEmpty()) { "No frames available for representative selection" }
+        val maxLandmarkIndex = frames.maxOfOrNull { it.normalizedLandmarks.lastIndex } ?: return frames.last()
+        if (maxLandmarkIndex < 0) return frames.last()
+        val averages = Array<FloatArray?>(maxLandmarkIndex + 1) { null }
+        for (landmarkIndex in 0..maxLandmarkIndex) {
             var sumX = 0f
             var sumY = 0f
             var count = 0
             frames.forEach { frame ->
                 val landmark = frame.normalizedLandmarks.getOrNull(landmarkIndex)
                 if (isPresent(landmark)) {
-                    sumX += landmark!!.x()
+                    sumX += landmark.x()
                     sumY += landmark.y()
                     count += 1
                 }
@@ -369,7 +376,7 @@ class PoseRecordingActivity : AppCompatActivity() {
         return frames.minByOrNull { frame ->
             var total = 0f
             var used = 0
-            for (landmarkIndex in 0..MAX_LANDMARK_INDEX) {
+            for (landmarkIndex in 0..maxLandmarkIndex) {
                 val average = averages[landmarkIndex] ?: continue
                 val landmark = frame.normalizedLandmarks.getOrNull(landmarkIndex) ?: continue
                 if (!isPresent(landmark)) continue
@@ -378,7 +385,7 @@ class PoseRecordingActivity : AppCompatActivity() {
                 total += (dx * dx) + (dy * dy)
                 used += 1
             }
-            if (used == 0) Float.MAX_VALUE else total / used
+            if (used == 0) INVALID_DELTA else total / used
         } ?: frames.last()
     }
 
@@ -455,7 +462,7 @@ class PoseRecordingActivity : AppCompatActivity() {
         fun setInteractionEnabled(enabled: Boolean) {
             if (interactionsEnabled == enabled) return
             interactionsEnabled = enabled
-            notifyDataSetChanged()
+            notifyItemRangeChanged(0, itemCount)
         }
     }
 
@@ -485,9 +492,9 @@ class PoseRecordingActivity : AppCompatActivity() {
                 )
             )
             recordButton.isEnabled = interactionsEnabled
-            recordButton.setOnClickListener { if (interactionsEnabled) onRecordClick(pose) }
+            recordButton.setOnClickListener { onRecordClick(pose) }
             resetButton.isEnabled = interactionsEnabled && hasCustomData
-            resetButton.setOnClickListener { if (interactionsEnabled) onResetClick(pose) }
+            resetButton.setOnClickListener { onResetClick(pose) }
         }
     }
 
@@ -506,14 +513,18 @@ class PoseRecordingActivity : AppCompatActivity() {
     }
 
     companion object {
-        private const val REQUIRED_STABLE_DURATION_MS = 5_000L
+        private const val RECORDING_DURATION_SECONDS = 5
         private const val ONE_SECOND_MS = 1_000L
+        private const val REQUIRED_STABLE_DURATION_MS = RECORDING_DURATION_SECONDS * ONE_SECOND_MS
         private const val STABILITY_WINDOW_MS = 1_000L
         private const val FRAME_BUFFER_WINDOW_MS = 5_000L
-        private const val RECORDING_DURATION_SECONDS = 5
+        // Normalized coordinate-space delta threshold (~3% per axis) tolerated as "still".
         private const val MAX_AVERAGE_LANDMARK_DELTA = 0.03f
+        private const val INVALID_DELTA = Float.MAX_VALUE
+        // Accept majority pose agreement in the recent window to avoid false rejections from jitter.
         private const val MIN_POSE_MATCH_RATIO = 0.7f
         private const val MIN_STABLE_FRAME_COUNT = 4
+        // Require landmark groups to be visible in at least 60% of stability-window frames.
         private const val MIN_GROUP_COVERAGE_RATIO = 0.6f
         private const val RECORDING_MIN_CONFIDENCE = 0.12f
         private const val LEFT_SHOULDER = 11
@@ -524,7 +535,6 @@ class PoseRecordingActivity : AppCompatActivity() {
         private const val RIGHT_KNEE = 26
         private const val LEFT_ANKLE = 27
         private const val RIGHT_ANKLE = 28
-        private const val MAX_LANDMARK_INDEX = RIGHT_ANKLE
         private const val STATE_RECORDING_POSE_ID = "state_recording_pose_id"
         private const val TAG = "PoseRecordingActivity"
     }
