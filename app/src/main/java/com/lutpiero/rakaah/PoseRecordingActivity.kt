@@ -362,7 +362,7 @@ class PoseRecordingActivity : AppCompatActivity() {
             var count = 0
             frames.forEach { frame ->
                 val landmark = frame.normalizedLandmarks.getOrNull(landmarkIndex)
-                if (isPresent(landmark)) {
+                if (landmark != null && isPresent(landmark)) {
                     sumX += landmark.x()
                     sumY += landmark.y()
                     count += 1
