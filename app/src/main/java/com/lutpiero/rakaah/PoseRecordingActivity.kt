@@ -259,7 +259,8 @@ class PoseRecordingActivity : AppCompatActivity() {
         val missingLegGroups = missingGroups.intersect(setOf(LandmarkGroup.KNEES, LandmarkGroup.ANKLES))
         val failureMessageRes = when {
             !hasAnyLandmarks -> R.string.pose_recording_move_into_frame
-            missingLegGroups.isNotEmpty() -> R.string.pose_recording_missing_legs
+            (target.physicalPose == PhysicalPose.STANDING && missingLegGroups.isNotEmpty()) ->
+                R.string.pose_recording_missing_legs
             missingGroups.isNotEmpty() -> R.string.pose_recording_missing_upper_body
             !hasPoseConsistency && !hasLowMotion -> R.string.pose_recording_hold_pose_steady
             else -> null
@@ -397,9 +398,9 @@ class PoseRecordingActivity : AppCompatActivity() {
     }
 
     private fun requiredGroupsForPose(pose: PhysicalPose): List<LandmarkGroup> = when (pose) {
-        PhysicalPose.STANDING, PhysicalPose.BOWING ->
+        PhysicalPose.STANDING ->
             listOf(LandmarkGroup.HIPS, LandmarkGroup.KNEES, LandmarkGroup.ANKLES)
-        PhysicalPose.SITTING, PhysicalPose.PROSTRATING ->
+        PhysicalPose.BOWING, PhysicalPose.SITTING, PhysicalPose.PROSTRATING ->
             listOf(LandmarkGroup.SHOULDERS, LandmarkGroup.HIPS)
         PhysicalPose.UNKNOWN -> emptyList()
     }
