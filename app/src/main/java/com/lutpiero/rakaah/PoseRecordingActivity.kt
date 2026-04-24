@@ -254,12 +254,13 @@ class PoseRecordingActivity : AppCompatActivity() {
         val hasPoseConsistency = stableWindow.isNotEmpty() &&
             stableWindow.count { it.detectedPose == target.physicalPose }.toFloat() / stableWindow.size >= MIN_POSE_MATCH_RATIO
         val hasLowMotion = hasLowMotionStreak(targetFrames)
+        val shouldRequireLegs = target.physicalPose == PhysicalPose.STANDING
 
         val missingGroups = missingRequiredGroups(target.physicalPose, targetFrames)
         val missingLegGroups = missingGroups.intersect(setOf(LandmarkGroup.KNEES, LandmarkGroup.ANKLES))
         val failureMessageRes = when {
             !hasAnyLandmarks -> R.string.pose_recording_move_into_frame
-            missingLegGroups.isNotEmpty() -> R.string.pose_recording_missing_legs
+            shouldRequireLegs && missingLegGroups.isNotEmpty() -> R.string.pose_recording_missing_legs
             missingGroups.isNotEmpty() -> R.string.pose_recording_missing_upper_body
             !hasPoseConsistency && !hasLowMotion -> R.string.pose_recording_hold_pose_steady
             else -> null
@@ -347,7 +348,11 @@ class PoseRecordingActivity : AppCompatActivity() {
             val coverage = frames.count { frame ->
                 group.indices.any { index -> isPresent(frame.normalizedLandmarks.getOrNull(index)) }
             }.toFloat() / frames.size
-            coverage < MIN_GROUP_COVERAGE_RATIO
+            val minimumCoverage = when {
+                group == LandmarkGroup.KNEES || group == LandmarkGroup.ANKLES -> MIN_LEG_GROUP_COVERAGE_RATIO
+                else -> MIN_GROUP_COVERAGE_RATIO
+            }
+            coverage < minimumCoverage
         }
     }
 
@@ -397,8 +402,10 @@ class PoseRecordingActivity : AppCompatActivity() {
     }
 
     private fun requiredGroupsForPose(pose: PhysicalPose): List<LandmarkGroup> = when (pose) {
-        PhysicalPose.STANDING, PhysicalPose.BOWING ->
+        PhysicalPose.STANDING ->
             listOf(LandmarkGroup.HIPS, LandmarkGroup.KNEES, LandmarkGroup.ANKLES)
+        PhysicalPose.BOWING ->
+            listOf(LandmarkGroup.SHOULDERS, LandmarkGroup.HIPS)
         PhysicalPose.SITTING, PhysicalPose.PROSTRATING ->
             listOf(LandmarkGroup.SHOULDERS, LandmarkGroup.HIPS)
         PhysicalPose.UNKNOWN -> emptyList()
@@ -526,6 +533,8 @@ class PoseRecordingActivity : AppCompatActivity() {
         private const val MIN_STABLE_FRAME_COUNT = 4
         // Require landmark groups to be visible in at least 60% of stability-window frames.
         private const val MIN_GROUP_COVERAGE_RATIO = 0.6f
+        // Legs are more often partially occluded/noisy in front floor-camera framing, so use looser coverage.
+        private const val MIN_LEG_GROUP_COVERAGE_RATIO = 0.45f
         private const val RECORDING_MIN_CONFIDENCE = 0.12f
         private const val LEFT_SHOULDER = 11
         private const val RIGHT_SHOULDER = 12
